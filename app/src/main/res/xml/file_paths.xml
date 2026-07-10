@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 缓存目录 - 用于导出数据文件 -->
+    <cache-path name="exports" path="exports/" />
+</paths>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      主色调 - 邮政蓝灰 #3D4F6B
+      与 Compose Theme.kt 的 Primary 完全一致，避免 Splash → Compose 颜色跳变。
+      修复 P0-3：原 XML 主色是橙色 #FF9F43，与 Compose 主题蓝灰割裂。
+    -->
+    <color name="primary">#3D4F6B</color>
+    <color name="primary_light">#5C6F8A</color>
+    <color name="primary_dark">#2A384F</color>
+
+    <!-- 强调色 - 莓果粉 -->
+    <color name="accent">#FF6B9D</color>
+
+    <!-- 背景色 - 纯白（与 AI 生成的白底图片融合，保证沉浸感） -->
+    <color name="background">#FFFFFF</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#F5F5F7</color>
+
+    <!-- 文字 -->
+    <color name="text_primary">#1E293B</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="text_hint">#94A3B8</color>
+
+    <!-- 功能色 -->
+    <color name="success">#16A34A</color>
+    <color name="error">#DC2626</color>
+    <color name="warning">#F59E0B</color>
+
+    <!-- 反思/确认页面 - 白底沉浸式（与 AI 白底图片融合） -->
+    <color name="quiz_background">#FFFFFF</color>
+    <color name="quiz_card">#F5F5F7</color>
+    <color name="quiz_text">#1E293B</color>
+    <!-- 反思页强调色与主色对齐，避免视觉割裂 -->
+    <color name="quiz_accent">#3D4F6B</color>
+</resources>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  XML 字符串资源（精简版）
+  P2 清理：Compose UI 文本全部在代码中硬编码（暂未做 i18n），
+  XML 层只保留被 AndroidManifest.xml / accessibility_service_config.xml /
+  代码 getString() 实际引用的字符串，避免 UnusedResources 警告 + 减小 APK。
+  未来如需多语言支持，建议在代码层用 Compose stringResource + values-zh/values-en 拆分。
+-->
+<resources>
+    <!-- 应用名称（AndroidManifest.xml android:label 引用） -->
+    <string name="app_name">专注猫</string>
+
+    <!-- 无障碍服务（AndroidManifest.xml + accessibility_service_config.xml 引用） -->
+    <string name="accessibility_service_label">专注猫 - 应用监控</string>
+    <string name="accessibility_service_description">监控指定应用的启动，在进入分心应用前弹出反思问答页面，帮助您保持专注。选择退出即可获得猫粮奖励，投喂您的专注猫咪。</string>
+
+    <!-- 前台服务通知（FocusGuardService.kt + FocusGuardApp.kt getString() 引用） -->
+    <string name="notification_channel_name">专注守护服务</string>
+    <string name="notification_channel_desc">保持专注猫在后台运行</string>
+    <string name="notification_title">专注猫运行中</string>
+    <string name="notification_text">正在守护你的专注时间，猫咪在等你回来</string>
+</resources>
