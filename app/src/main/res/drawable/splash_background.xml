@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 应用背景色，与 app 内容一致，避免闪屏 -->
+    <!-- 启动图标由系统 SplashScreen API 自动居中展示，此处不再叠加旧版蓝色 SVG logo -->
+    <item android:drawable="@color/quiz_background" />
+</layer-list>

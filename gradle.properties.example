@@ -1,0 +1,19 @@
+# 项目级 Gradle 配置示例
+# 复制本文件为 gradle.properties 后按需填写（gradle.properties 已被 .gitignore 忽略，不会提交）
+
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+org.gradle.parallel=true
+org.gradle.caching=true
+
+android.useAndroidX=true
+android.nonTransitiveRClass=true
+kotlin.code.style=official
+android.suppressUnsupportedCompileSdk=35
+
+# ===== Release 签名配置（可选，仅构建 release APK 时需要）=====
+# 更安全的做法：将下面 4 个属性放到 ~/.gradle/gradle.properties（用户级）
+# 或通过环境变量注入（CI/CD 推荐）
+# FOCUSCAT_STORE_FILE=../focuscat-release.jks
+# FOCUSCAT_STORE_PASSWORD=your_store_password
+# FOCUSCAT_KEY_ALIAS=your_key_alias
+# FOCUSCAT_KEY_PASSWORD=your_key_password

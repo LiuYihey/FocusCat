@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 主应用主题 - 白底浅色，与 AI 生成的白底图片融合保证沉浸感 -->
+    <!-- parent 用平台主题，避免引入 AppCompat 依赖；颜色统一 postal 蓝灰（与 Compose Theme 一致） -->
+    <style name="Theme.FocusGuard" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/quiz_background</item>
+        <item name="android:navigationBarColor">@color/quiz_background</item>
+        <item name="android:windowBackground">@color/quiz_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <!-- windowLightNavigationBar 需 API 27，minSdk=26，用 tools:targetApi 限定 -->
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+    </style>
+
+    <!-- 问答页面主题 - 白底沉浸 -->
+    <style name="Theme.FocusGuard.Quiz" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/quiz_background</item>
+        <item name="android:navigationBarColor">@color/quiz_background</item>
+        <item name="android:windowBackground">@color/quiz_background</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- Splash Screen 主题 -->
+    <style name="Theme.FocusGuard.Splash" parent="Theme.FocusGuard">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
+
+</resources>

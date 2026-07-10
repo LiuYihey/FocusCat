@@ -1,0 +1,61 @@
+# Built application files
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration
+local.properties
+gradle.properties
+
+# Signing keys — never commit
+*.jks
+*.keystore
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+credentials.json
+google-services.json
+
+# IDE
+*.iml
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Android NDK / native
+.externalNativeBuild/
+.cxx/
+captures/
+
+# Kotlin / Java
+*.class
+*.jar
+*.war
+*.ear
+
+# Logs & crash dumps
+*.log
+hs_err_pid*
+replay_pid*
+
+# Archive folder (local dev artifacts, logs, iteration history)
+old/
+
+# Generated / temp
+app_icon_generated.png
