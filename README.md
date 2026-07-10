@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="./logo.png" alt="FocusCat Logo" width="320" />
-</p>
+<img src="./logo.png" alt="FocusCat Logo" width="100%" />
 
 <h1 align="center">FocusCat · 专注猫</h1>
 
