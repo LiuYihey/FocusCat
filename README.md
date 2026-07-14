@@ -10,6 +10,10 @@
   <a href="https://github.com/LiuYihey/FocusCat/releases">下载 APK</a>
   ·
   <a href="./docs/DESIGN.md">设计文档</a>
+  ·
+  <a href="https://focuscat-web-demo.vercel.app/">在线 Web 演示</a>
+  ·
+  <a href="http://xhslink.com/o/9T6S2KikAru">小红书演示视频</a>
 </p>
 
 ---
@@ -27,6 +31,10 @@
 - **锁机专注模式** — 完全专注时不能切屏，每专注半小时获得额外奖励
 
 把「克制分心」从痛苦约束，变成温柔陪伴。
+
+<p align="center">
+  <img src="./演示.png" alt="FocusCat 演示" width="100%" />
+</p>
 
 ---
 
