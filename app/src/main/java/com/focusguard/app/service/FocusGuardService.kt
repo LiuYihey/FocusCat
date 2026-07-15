@@ -1,5 +1,6 @@
 package com.focusguard.app.service
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.usage.UsageStatsManager
@@ -108,10 +109,63 @@ class FocusGuardService : android.app.Service() {
         return null
     }
 
+    /**
+     * 修复 Bug 3：用户从最近任务列表划掉 app 时触发
+     * 原代码无此回调，导致用户划掉 app 后服务被杀、轮询停摆，
+     * 无障碍服务虽显示"已启用"但实际已失效（进程被杀，事件无法被处理）。
+     *
+     * 此处调度一个一次性的 AlarmManager 闹钟，1 秒后拉起服务：
+     * - 若守护开关已关闭，ServiceRestartReceiver.onReceive 会直接 return，不重启
+     * - 若守护开关仍开启，则拉起前台服务恢复轮询引擎
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        scheduleRestart()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         pollingJob?.cancel()
         serviceScope.cancel()
+        // 修复 Bug 3：服务被系统回收时调度重启
+        // 与 onTaskRemoved 相同的恢复机制，确保服务在任何被杀场景下都能恢复
+        // 若守护开关已关闭，ServiceRestartReceiver 会直接 return，不会错误重启
+        scheduleRestart()
         super.onDestroy()
+    }
+
+    /**
+     * 调度一次性服务重启闹钟（修复 Bug 3）
+     * 1 秒后触发 ServiceRestartReceiver，由其检查守护开关状态决定是否拉起服务
+     */
+    private fun scheduleRestart() {
+        if (!AppDetectionManager.isProtectionEnabled) return
+        try {
+            val alarmManager = getSystemService(android.content.Context.ALARM_SERVICE) as? AlarmManager
+                ?: return
+            val intent = android.content.Intent(this, ServiceRestartReceiver::class.java)
+            val pendingIntent = android.app.PendingIntent.getBroadcast(
+                this,
+                ServiceRestartReceiver.REQUEST_CODE_RESTART,
+                intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            // 一次性闹钟，1 秒后触发（setExact 比 setInexactRepeating 更及时）
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    android.os.SystemClock.elapsedRealtime() + 1000L,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    android.os.SystemClock.elapsedRealtime() + 1000L,
+                    pendingIntent
+                )
+            }
+        } catch (e: Exception) {
+            // 调度失败静默忽略，依赖 START_STICKY 和周期闹钟兜底
+        }
     }
 
     /**

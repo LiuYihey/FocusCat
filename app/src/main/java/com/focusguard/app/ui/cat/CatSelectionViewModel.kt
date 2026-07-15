@@ -27,12 +27,14 @@ data class CatSelectionUiState(
     val selectedExistingCatId: Int? = null,
     /** 用户输入的猫名（首次选择 / 切换模式下添加第二只用） */
     val catName: String = "",
-    /** 切换模式下是否处于“添加第二只猫”的子流程 */
+    /** 切换模式下是否处于"添加第二只猫"的子流程 */
     val isAddingNewCat: Boolean = false,
     /** 是否正在创建/切换 */
     val isCreating: Boolean = false,
     /** 是否创建/切换完成 */
     val isCreated: Boolean = false,
+    /** "初识之友"成就（投喂10次）是否已解锁，决定能否添加第二只猫 */
+    val isFirstFriendUnlocked: Boolean = false,
     /** 错误提示 */
     val errorMessage: String? = null
 )
@@ -43,6 +45,7 @@ data class CatSelectionUiState(
  * 简化设计（仅 2 个品种：布偶 + 橘猫）：
  * - 首次启动：选品种 + 起名 → 创建第一只猫
  * - 切换模式：显示已创建的猫列表，点击即切换；若只有 1 只，可添加第二只（上限 2 只）
+ *   添加第二只猫需先解锁"初识之友"成就（投喂10次）
  */
 @HiltViewModel
 class CatSelectionViewModel @Inject constructor(
@@ -52,9 +55,13 @@ class CatSelectionViewModel @Inject constructor(
     private val _state = MutableStateFlow(CatSelectionUiState())
     val state: StateFlow<CatSelectionUiState> = _state.asStateFlow()
 
+    /** "初识之友"成就的里程碑值（投喂10次） */
+    private val firstFriendMilestone = 10
+
     init {
         loadBreeds()
         loadExistingCats()
+        checkFirstFriendAchievement()
     }
 
     /** 观察所有品种（Flow），种子数据插入后自动更新 */
@@ -72,6 +79,17 @@ class CatSelectionViewModel @Inject constructor(
             catRepository.observeAllCats().collect { cats ->
                 _state.update { it.copy(existingCats = cats) }
             }
+        }
+    }
+
+    /**
+     * 检查"初识之友"成就是否已解锁
+     * 只有解锁后才能添加第二只猫
+     */
+    private fun checkFirstFriendAchievement() {
+        viewModelScope.launch {
+            val unlocked = catRepository.isAchievementUnlocked(firstFriendMilestone)
+            _state.update { it.copy(isFirstFriendUnlocked = unlocked) }
         }
     }
 
@@ -170,12 +188,22 @@ class CatSelectionViewModel @Inject constructor(
 
     /**
      * 切换模式下添加第二只猫
+     * 前置条件：解锁"初识之友"成就（投喂10次）
      * 必须先选择品种并输入名字
      */
     fun addSecondCat() {
         val currentState = _state.value
         if (currentState.existingCats.size >= 2) {
             _state.update { it.copy(errorMessage = "最多只能拥有两只猫咪") }
+            return
+        }
+        // 成就解锁检查：未解锁"初识之友"不允许添加新伙伴
+        if (!currentState.isFirstFriendUnlocked) {
+            _state.update {
+                it.copy(
+                    errorMessage = "需先解锁「初识之友」成就（投喂 10 次）才能添加新伙伴"
+                )
+            }
             return
         }
         if (currentState.selectedBreedId == null) {

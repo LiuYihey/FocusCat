@@ -26,9 +26,25 @@ interface AffinityAchievementDao {
     @Query("SELECT * FROM affinity_achievements WHERE unlockedAt IS NULL ORDER BY milestone ASC")
     suspend fun getLockedAchievements(): List<AffinityAchievementEntity>
 
+    /**
+     * 查询指定里程碑成就的解锁时间戳
+     * 用于"解锁新伙伴"前置条件判断：只有解锁"初识之友"(milestone=10) 后才能添加第二只猫。
+     *
+     * @return 解锁时间戳，null 表示未解锁
+     */
+    @Query("SELECT unlockedAt FROM affinity_achievements WHERE milestone = :milestone LIMIT 1")
+    suspend fun getUnlockedAt(milestone: Int): Long?
+
     /** 解锁指定里程碑成就 */
     @Query("UPDATE affinity_achievements SET unlockedAt = :unlockedAt WHERE milestone = :milestone AND unlockedAt IS NULL")
     suspend fun unlock(milestone: Int, unlockedAt: Long)
+
+    /**
+     * 更新成就描述（用于种子数据版本更新时同步新文案）
+     * 仅更新未解锁的成就，避免覆盖已解锁成就的历史描述
+     */
+    @Query("UPDATE affinity_achievements SET description = :description WHERE milestone = :milestone")
+    suspend fun updateDescription(milestone: Int, description: String)
 
     /** 插入成就（若已存在则替换） */
     @Insert(onConflict = OnConflictStrategy.REPLACE)

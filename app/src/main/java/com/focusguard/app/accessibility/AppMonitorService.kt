@@ -60,10 +60,12 @@ class AppMonitorService : AccessibilityService() {
         if (!serviceScope.isActive) {
             serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         }
-        // 通知 AppDetectionManager 服务已连接
-        AppDetectionManager.setAccessibilityConnected(true)
-        // 初始化守护开关状态（从 SharedPreferences 恢复）
+        // 修复 Bug 2：必须先 init(this) 再 setAccessibilityConnected(true)
+        // 原顺序倒置：setAccessibilityConnected 在 init 之前调用，导致 prefs 为 null，
+        // hasUserOperated 检查失效，用户手动关闭守护后会被自动重新打开。
+        // 正确顺序：先 init 恢复 SharedPreferences，再通知连接状态，hasUserOperated 才能正确判断。
         AppDetectionManager.init(this)
+        AppDetectionManager.setAccessibilityConnected(true)
         // 从数据库加载拦截列表
         serviceScope.launch {
             val db = AppDatabase.getInstance(this@AppMonitorService)

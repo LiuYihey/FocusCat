@@ -129,13 +129,14 @@ object SeedData {
     /**
      * 获取好感度成就种子数据
      * 3 个里程碑：10/50/100 次投喂
+     * "初识之友"(10次) 解锁后可添加第二只猫咪作为奖励
      */
     fun getSeedAchievements(): List<AffinityAchievementEntity> {
         return listOf(
             AffinityAchievementEntity(
                 milestone = 10,
                 title = "初识之友",
-                description = "投喂 10 次，猫咪开始信任你"
+                description = "投喂 10 次，猫咪开始信任你\n【奖励】解锁添加新伙伴资格"
             ),
             AffinityAchievementEntity(
                 milestone = 50,

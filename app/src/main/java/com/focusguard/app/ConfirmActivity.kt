@@ -353,12 +353,15 @@ class ConfirmActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Activity 进入后台时释放拦截状态
+        // Bug 5：弹窗解耦 - Activity 进入后台时立即销毁，避免用户打开 FocusCat 时
+        // 仍显示确认页（singleInstance 模式下 Activity 会残留在独立 task 中）
         // 如果用户没有选择"还是进入"，清空 lastAppEnterPkg 防止残留
         if (!hasUserEnteredApp) {
             AppDetectionManager.clearAppEnterSession()
         }
         AppDetectionManager.onQuizDismissed()
+        // 解耦：弹窗进入后台即销毁，确保不影响 FocusCat 主界面
+        finish()
     }
 
     override fun onDestroy() {
