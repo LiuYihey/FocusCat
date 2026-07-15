@@ -9,8 +9,6 @@
 <p align="center">
   <a href="https://github.com/LiuYihey/FocusCat/releases">下载 APK</a>
   ·
-  <a href="./docs/DESIGN.md">设计文档</a>
-  ·
   <a href="https://focuscat-web-demo.vercel.app/">在线 Web 演示</a>
   ·
   <a href="http://xhslink.com/o/9T6S2KikAru">小红书演示视频</a>
@@ -131,21 +129,13 @@ FocusCat/
 
 ---
 
-## 签名与密钥说明
-
-Release APK 需要签名密钥。本项目**不会**将以下文件提交到仓库：
-
-- `*.jks` / `*.keystore` — 签名密钥库
-- `gradle.properties` — 可能包含签名密码
-- `local.properties` — 本地 SDK 路径
-
-请使用 `gradle.properties.example` 作为模板，在本地或 `~/.gradle/gradle.properties` 中配置签名信息。详见 [docs/DESIGN.md](./docs/DESIGN.md) 中的构建章节。
-
----
-
 ## 致谢
 
-感谢每一位愿意为注意力而战的使用者。愿你和你的小猫，都能专注而快乐。
+感谢传奇布偶猫原型 — **小八 / little eight / little 八 / 小eight**
+
+<p align="center">
+  <img src="./小八.png" alt="小八" width="50%" />
+</p>
 
 <p align="center">
   <sub>Made with 🐱 by LiuYihey</sub>
