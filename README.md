@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/LiuYihey/FocusCat/releases">下载 APK</a>
   ·
-  <a href="https://focuscat-web-demo.vercel.app/">在线 Web 演示</a>
+  <a href="https://focuscat.online/">在线 Web 演示</a>
   ·
   <a href="http://xhslink.com/o/9T6S2KikAru">小红书演示视频</a>
 </p>
