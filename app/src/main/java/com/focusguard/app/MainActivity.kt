@@ -178,6 +178,12 @@ class MainActivity : ComponentActivity() {
             // 好感度成就
             if (achievementDao.getAllAchievements().isEmpty()) {
                 achievementDao.insertAll(SeedData.getSeedAchievements())
+            } else {
+                // 同步成就描述更新（已有成就记录的用户也需更新文案）
+                // "初识之友"新增"解锁新伙伴"奖励说明
+                SeedData.getSeedAchievements().forEach { seed ->
+                    achievementDao.updateDescription(seed.milestone, seed.description)
+                }
             }
         }
     }

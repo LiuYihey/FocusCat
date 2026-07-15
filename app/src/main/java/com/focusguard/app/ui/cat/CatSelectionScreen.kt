@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -149,12 +150,13 @@ fun CatSelectionScreen(
                         onClick = { viewModel.selectExistingCat(cat.id) }
                     )
                 }
-                // 不足 2 只时显示“添加新伙伴”入口
+                // 不足 2 只时显示"添加新伙伴"入口
                 if (state.existingCats.size < 2) {
                     item(key = "add_new") {
                         AddNewCatCard(
                             isSelected = state.isAddingNewCat,
                             accentColor = accentColor,
+                            isFirstFriendUnlocked = state.isFirstFriendUnlocked,
                             onClick = { viewModel.setAddingNewCat(!state.isAddingNewCat) }
                         )
                     }
@@ -163,8 +165,8 @@ fun CatSelectionScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 添加第二只猫的子流程：品种 + 命名
-            if (state.isAddingNewCat && state.existingCats.size < 2) {
+            // 添加第二只猫的子流程：品种 + 命名（仅成就已解锁时显示）
+            if (state.isAddingNewCat && state.existingCats.size < 2 && state.isFirstFriendUnlocked) {
                 AddSecondCatForm(
                     breeds = state.breeds,
                     selectedBreedId = state.selectedBreedId,
@@ -424,16 +426,18 @@ private fun ExistingCatCard(
 }
 
 /**
- * “添加新伙伴”入口卡片（切换模式下，不足 2 只时显示）
+ * "添加新伙伴"入口卡片（切换模式下，不足 2 只时显示）
+ * @param isFirstFriendUnlocked "初识之友"成就是否已解锁，未解锁时显示锁定状态
  */
 @Composable
 private fun AddNewCatCard(
     isSelected: Boolean,
     accentColor: Color,
+    isFirstFriendUnlocked: Boolean = false,
     onClick: () -> Unit
 ) {
     val scale by animateFloatAsState(
-        targetValue = if (isSelected) 1.03f else 1.0f,
+        targetValue = if (isSelected && isFirstFriendUnlocked) 1.03f else 1.0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -442,12 +446,12 @@ private fun AddNewCatCard(
     )
     val surfaceColor = MaterialTheme.colorScheme.surface
     val containerColor by animateColorAsState(
-        targetValue = if (isSelected) surfaceColor.copy(alpha = 0.8f) else surfaceColor,
+        targetValue = if (isSelected && isFirstFriendUnlocked) surfaceColor.copy(alpha = 0.8f) else surfaceColor,
         animationSpec = tween(durationMillis = 300),
         label = "add_new_container_color"
     )
     val borderColor by animateColorAsState(
-        targetValue = if (isSelected) accentColor else accentColor.copy(alpha = 0.3f),
+        targetValue = if (isSelected && isFirstFriendUnlocked) accentColor else accentColor.copy(alpha = 0.3f),
         animationSpec = tween(durationMillis = 300),
         label = "add_new_border_color"
     )
@@ -459,7 +463,7 @@ private fun AddNewCatCard(
             .height(220.dp)
             .padding(4.dp)
             .scale(scale)
-            .clickable {
+            .clickable(enabled = isFirstFriendUnlocked) {
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             }
@@ -475,31 +479,72 @@ private fun AddNewCatCard(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .background(accentColor.copy(alpha = 0.12f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = null,
-                        tint = accentColor,
-                        modifier = Modifier.size(28.dp)
+                if (isFirstFriendUnlocked) {
+                    // 已解锁：显示添加图标
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(accentColor.copy(alpha = 0.12f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = null,
+                            tint = accentColor,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "添加新伙伴",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = accentColor
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "最多两只",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
+                    )
+                } else {
+                    // 未解锁：显示锁定状态和成就要求
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "添加新伙伴",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "解锁「初识之友」成就后开放",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "投喂 10 次即可解锁",
+                        color = accentColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 }
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = "添加新伙伴",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = accentColor
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "最多两只",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
-                )
             }
         }
     }

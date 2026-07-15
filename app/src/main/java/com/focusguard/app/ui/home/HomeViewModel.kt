@@ -216,13 +216,14 @@ class HomeViewModel @Inject constructor(
 
     /**
      * 检查权限状态
-     * 当无障碍服务已授权但守护开关未开启时，自动开启守护
-     * 这是「所有权限都开了但拦截不触发」的核心修复
      *
-     * FIX #2: 当 app 进程被后台清除后重启，AppDetectionManager 单例的内存状态被重置，
-     * isAccessibilityConnected 默认 false，而 onServiceConnected 尚未被调用（服务正在重连中），
-     * 导致 UI 显示「链路断开」。此处检测到系统设置中无障碍已启用时，主动同步连接状态，
-     * 因为系统会自动重启已启用的无障碍服务，onServiceConnected 后续会确认连接。
+     * 修复 Bug 2：原代码在"无障碍已授权 + 守护未开启"时无条件调用 autoEnableProtection()，
+     * 导致用户手动关闭守护后，每次进入首页或从设置返回时守护被自动重新打开。
+     *
+     * 新逻辑：尊重用户的手动选择，不再自动开启守护开关。
+     * 仅在守护已开启时确保前台服务运行（进程被杀重启后服务可能未运行）。
+     * 首次安装的自动开启由 AppDetectionManager.setAccessibilityConnected() 内的
+     * hasUserOperated 检查负责（仅当用户从未操作过守护开关时自动开启）。
      */
     fun checkPermissions() {
         val context = getApplication<Application>()
@@ -241,10 +242,9 @@ class HomeViewModel @Inject constructor(
             AppDetectionManager.setAccessibilityConnected(true)
         }
 
-        // 核心修复：无障碍已授权 + 守护未开启 → 自动开启守护并启动前台服务
-        if (accessibilityGranted && !AppDetectionManager.isProtectionEnabled) {
-            autoEnableProtection()
-        } else if (AppDetectionManager.isProtectionEnabled) {
+        // 修复 Bug 2：移除"无障碍已授权 + 守护未开启 → 自动开启守护"逻辑
+        // 用户手动关闭守护后不再自动重开，仅当守护已开启时确保前台服务运行
+        if (AppDetectionManager.isProtectionEnabled) {
             // FIX #2: 守护已开启但前台保活服务可能未运行（进程被杀重启后）
             // 重新启动前台服务确保轮询引擎运行
             try {
@@ -253,22 +253,6 @@ class HomeViewModel @Inject constructor(
             } catch (e: Exception) {
                 // 启动失败不影响守护开关状态
             }
-        }
-    }
-
-    /**
-     * 自动开启守护（无障碍已授权但守护关闭时调用）
-     * 启动前台服务保活，确保拦截链路完整
-     */
-    private fun autoEnableProtection() {
-        AppDetectionManager.setProtectionEnabled(true)
-        _uiState.update { it.copy(isProtectionEnabled = true) }
-        val context = getApplication<Application>()
-        try {
-            val intent = Intent(context, FocusGuardService::class.java)
-            ContextCompat.startForegroundService(context, intent)
-        } catch (e: Exception) {
-            // 前台服务启动失败不影响守护开关状态，无障碍服务仍可独立工作
         }
     }
 

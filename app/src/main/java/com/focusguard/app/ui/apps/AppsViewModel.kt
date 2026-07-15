@@ -140,7 +140,12 @@ class AppsViewModel @Inject constructor(
 
     /**
      * 检查权限状态
-     * 当无障碍服务已授权但守护开关未开启时，自动开启守护
+     *
+     * 修复 Bug 2：原代码在"无障碍已授权 + 守护未开启"时无条件调用 autoEnableProtection()，
+     * 导致用户手动关闭守护后，每次进入应用管理页或从设置返回时守护被自动重新打开。
+     *
+     * 新逻辑：尊重用户的手动选择，不再自动开启守护开关。
+     * 仅在守护已开启时确保前台服务运行（进程被杀重启后服务可能未运行）。
      *
      * 注意：系统设置中无障碍已启用 ≠ 服务真正运行中
      * 服务可能因进程被杀、ROM 限制等原因崩溃，此时设置仍显示"已启用"但 onServiceConnected 未回调
@@ -166,31 +171,15 @@ class AppsViewModel @Inject constructor(
             )
         }
 
-        // 无障碍已授权 + 守护未开启 → 自动开启守护并启动前台服务
-        if (accessibilityGranted && !AppDetectionManager.isProtectionEnabled) {
-            autoEnableProtection()
-        } else if (AppDetectionManager.isProtectionEnabled) {
+        // 修复 Bug 2：移除"无障碍已授权 + 守护未开启 → 自动开启守护"逻辑
+        // 用户手动关闭守护后不再自动重开，仅当守护已开启时确保前台服务运行
+        if (AppDetectionManager.isProtectionEnabled) {
             try {
                 val intent = Intent(context, FocusGuardService::class.java)
                 ContextCompat.startForegroundService(context, intent)
             } catch (e: Exception) {
                 // 启动失败不影响守护开关状态
             }
-        }
-    }
-
-    /**
-     * 自动开启守护（无障碍已授权但守护关闭时调用）
-     */
-    private fun autoEnableProtection() {
-        AppDetectionManager.setProtectionEnabled(true)
-        _uiState.update { it.copy(isProtectionEnabled = true) }
-        val context = getApplication<Application>()
-        try {
-            val intent = Intent(context, FocusGuardService::class.java)
-            ContextCompat.startForegroundService(context, intent)
-        } catch (e: Exception) {
-            // 前台服务启动失败不影响守护开关状态
         }
     }
 

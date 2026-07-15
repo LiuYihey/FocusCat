@@ -136,18 +136,10 @@ class ReflectionActivity : ComponentActivity() {
         viewModel.loadQuestions(targetPackage)
 
         // 拦截返回键 - 返回即放弃进入目标应用（符合专注守护理念）
+        // Bug 5：弹窗解耦 - 回退直接关闭弹窗 + 退出约束的娱乐 app，不影响 FocusCat 主界面
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                // 用户选择不进入目标应用，直接关闭拦截页
-                // 这实际上是好的结果——用户克制了分心冲动
-                Toast.makeText(
-                    this@ReflectionActivity,
-                    "很好的克制，下次打开还会提醒你",
-                    Toast.LENGTH_SHORT
-                ).show()
-                // 修复迭代3-#1：原代码仅 finish()，会回到上一个 task（被拦截应用 A），
-                // onDestroy 调用 onQuizDismissed 清空去重状态，1.5s 后再次弹拦截页，死循环。
-                // 跳桌面打断循环，与 ConfirmActivity 返回键行为一致。
+                // 用户选择不进入目标应用，跳桌面关闭弹窗和被约束的娱乐 app
                 val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                     addCategory(Intent.CATEGORY_HOME)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -274,14 +266,16 @@ class ReflectionActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Activity 进入后台时释放拦截状态，让轮询能检测到"弹窗不在显示"
-        // 这样用户再次打开被约束应用时 checkAndTrigger 能正常触发新弹窗
-        // 跳转 ConfirmActivity 时不释放（由 ConfirmActivity 接管 isQuizShowing）
+        // Bug 5：弹窗解耦 - Activity 进入后台时立即销毁，避免用户打开 FocusCat 时
+        // 仍显示拦截页（singleInstance 模式下 Activity 会残留在独立 task 中）
+        // 跳转 ConfirmActivity 时不销毁（由 ConfirmActivity 接管 isQuizShowing）
         if (!isTransitioningToConfirm) {
             AppDetectionManager.onQuizDismissed()
             // 用户没有通过"选择进入"路径离开，清空进入会话
             // 防止 lastAppEnterPkg 残留导致再次打开时不弹窗
             AppDetectionManager.clearAppEnterSession()
+            // 解耦：弹窗进入后台即销毁，确保不影响 FocusCat 主界面
+            finish()
         }
     }
 

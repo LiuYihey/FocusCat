@@ -130,8 +130,8 @@ class CatViewModel @Inject constructor(
             feedingLock.set(false)
             return
         }
-        // 每日喂食限制：滑动 24h 窗口内最多 5 次，超限提示"小猫已经吃饱啦"
-        if (!catRepository.canFeedNow()) {
+        // 每日喂食限制：按猫咪独立计数，每只猫每日最多 5 次，超限提示"小猫已经吃饱啦"
+        if (!catRepository.canFeedNow(currentState.userCat?.id)) {
             feedingLock.set(false)
             _state.update { it.copy(errorMessage = "小猫已经吃饱啦，明天再喂吧~") }
             return
@@ -160,7 +160,7 @@ class CatViewModel @Inject constructor(
 
                 // 修复迭代5 Bug #3：消耗食物 + 投喂 + 解锁成就合并为单事务，
                 // 任一步失败整体回滚，避免食物被消耗但好感度未增加的数据不一致
-                val newlyUnlocked = catRepository.feedCatWithFood(foodId, affinityBonus)
+                val newlyUnlocked = catRepository.feedCatWithFood(foodId, affinityBonus, currentState.userCat?.id)
 
                 // 数据已持久化，开始进食动画；同时触发"+X 好感"反馈
                 // 视频播放完成后由 UI 调用 onFeedingVideoCompleted() 结束动画

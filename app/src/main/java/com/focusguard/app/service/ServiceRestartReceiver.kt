@@ -47,11 +47,16 @@ class ServiceRestartReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        /** 闹钟间隔（毫秒）- 5 分钟，AlarmManager 最小重复间隔建议 5 分钟 */
-        private const val ALARM_INTERVAL_MS = 5 * 60 * 1000L
+        /** 周期性闹钟间隔（毫秒）- 2 分钟，AlarmManager 最小重复间隔建议 5 分钟
+         *  修复 Bug 3：原 5 分钟间隔过长，服务被杀后最多需等 5 分钟才能恢复，
+         *  缩短到 2 分钟提升恢复及时性 */
+        private const val ALARM_INTERVAL_MS = 2 * 60 * 1000L
 
-        /** PendingIntent 请求码 */
+        /** 周期性闹钟的 PendingIntent 请求码 */
         private const val REQUEST_CODE = 2001
+
+        /** 一次性重启闹钟的 PendingIntent 请求码（FocusGuardService.onDestroy/onTaskRemoved 调用） */
+        const val REQUEST_CODE_RESTART = 2002
 
         /**
          * 注册定时闹钟（守护开启时调用）

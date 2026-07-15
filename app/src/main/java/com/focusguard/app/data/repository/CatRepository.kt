@@ -20,7 +20,8 @@ import java.util.Calendar
  * 喂食频率限制：每个自然日（0:00-24:00）最多 [MAX_FEED_PER_DAY] 次，
  * 超出后 [canFeedNow] 返回 false，由 UI 提示"小猫已经吃饱啦，明天再喂吧~"。
  * 跨天自动重置（以本地时区 0 点为界）。
- * 该限制为全局共享（不分猫咪），符合"切换猫咪时好感度保持不变"的语义。
+ *
+ * 按猫咪独立计数：每只猫有独立的每日喂食次数上限，切换猫咪时互不影响。
  */
 class CatRepository(
     private val db: RoomDatabase,
@@ -34,54 +35,75 @@ class CatRepository(
     companion object {
         /** 每个自然日最多喂食次数 */
         private const val MAX_FEED_PER_DAY = 5
-        /** SharedPreferences key：存储"当天喂食次数" */
-        private const val KEY_FEED_COUNT_TODAY = "feed_count_today"
-        /** SharedPreferences key：存储"上次喂食所属的自然日（yyyyMMdd）" */
-        private const val KEY_FEED_DAY_KEY = "feed_day_key"
+        /** SharedPreferences key 前缀：存储"当天喂食次数"（按 catId 命名空间分隔） */
+        private const val KEY_FEED_COUNT_TODAY_PREFIX = "feed_count_today_"
+        /** SharedPreferences key 前缀：存储"上次喂食所属的自然日（yyyyMMdd）" */
+        private const val KEY_FEED_DAY_KEY_PREFIX = "feed_day_key_"
     }
 
     /**
      * 是否还能继续喂食（今日未超过 [MAX_FEED_PER_DAY] 次）
+     * 按猫咪独立计数：不同猫咪有独立的每日喂食额度。
+     *
+     * @param catId 当前猫咪 ID，null 时返回 false
      */
-    fun canFeedNow(): Boolean = getFeedCountToday() < MAX_FEED_PER_DAY
+    fun canFeedNow(catId: Int?): Boolean {
+        if (catId == null) return false
+        return getFeedCountToday(catId) < MAX_FEED_PER_DAY
+    }
 
     /**
      * 今日剩余可喂食次数（0 表示已达上限）
+     * 按猫咪独立计数。
+     *
+     * @param catId 当前猫咪 ID，null 时返回 0
      */
-    fun getRemainingFeedCountToday(): Int =
-        (MAX_FEED_PER_DAY - getFeedCountToday()).coerceAtLeast(0)
+    fun getRemainingFeedCountToday(catId: Int?): Int {
+        if (catId == null) return 0
+        return (MAX_FEED_PER_DAY - getFeedCountToday(catId)).coerceAtLeast(0)
+    }
 
     /**
      * 获取今日已喂食次数，跨天时自动归零
+     * 按猫咪独立计数：每只猫的次数存储在独立的 SharedPreferences key 中。
+     *
+     * @param catId 当前猫咪 ID
      */
-    private fun getFeedCountToday(): Int {
+    private fun getFeedCountToday(catId: Int): Int {
         val todayKey = todayKey()
-        val savedDayKey = feedLimitPrefs.getString(KEY_FEED_DAY_KEY, null)
+        val dayKeyKey = KEY_FEED_DAY_KEY_PREFIX + catId
+        val countKey = KEY_FEED_COUNT_TODAY_PREFIX + catId
+        val savedDayKey = feedLimitPrefs.getString(dayKeyKey, null)
         // 跨天：次数归零，更新日期 key
         if (savedDayKey != todayKey) {
             feedLimitPrefs.edit()
-                .putString(KEY_FEED_DAY_KEY, todayKey)
-                .putInt(KEY_FEED_COUNT_TODAY, 0)
+                .putString(dayKeyKey, todayKey)
+                .putInt(countKey, 0)
                 .apply()
             return 0
         }
-        return feedLimitPrefs.getInt(KEY_FEED_COUNT_TODAY, 0)
+        return feedLimitPrefs.getInt(countKey, 0)
     }
 
     /**
      * 记录一次喂食，今日计数 +1（跨天则从 1 开始）
+     * 按猫咪独立计数。
+     *
+     * @param catId 当前猫咪 ID
      */
-    private fun recordFeedTimestamp() {
+    private fun recordFeedTimestamp(catId: Int) {
         val todayKey = todayKey()
-        val savedDayKey = feedLimitPrefs.getString(KEY_FEED_DAY_KEY, null)
+        val dayKeyKey = KEY_FEED_DAY_KEY_PREFIX + catId
+        val countKey = KEY_FEED_COUNT_TODAY_PREFIX + catId
+        val savedDayKey = feedLimitPrefs.getString(dayKeyKey, null)
         val newCount = if (savedDayKey == todayKey) {
-            feedLimitPrefs.getInt(KEY_FEED_COUNT_TODAY, 0) + 1
+            feedLimitPrefs.getInt(countKey, 0) + 1
         } else {
             1
         }
         feedLimitPrefs.edit()
-            .putString(KEY_FEED_DAY_KEY, todayKey)
-            .putInt(KEY_FEED_COUNT_TODAY, newCount)
+            .putString(dayKeyKey, todayKey)
+            .putInt(countKey, newCount)
             .apply()
     }
 
@@ -173,9 +195,14 @@ class CatRepository(
      * 调用方应在调用前先调用 [canFeedNow]，超限时给出"小猫已经吃饱啦"提示。
      *
      * @param affinityBonus 该食物提供的好感度加成
+     * @param catId 当前猫咪 ID，用于按猫咪独立计数每日喂食次数
      * @return 新解锁的成就列表（可能为空）
      */
-    suspend fun feedCat(affinityBonus: Int): List<AffinityAchievementEntity> {
+    suspend fun feedCat(
+        affinityBonus: Int,
+        catId: Int?
+    ): List<AffinityAchievementEntity> {
+        if (catId == null) return emptyList()
         val newlyUnlocked = db.withTransaction {
             userCatDao.incrementFeed(affinityBonus)
             val cat = userCatDao.getUserCat() ?: return@withTransaction emptyList()
@@ -192,7 +219,7 @@ class CatRepository(
             newlyUnlocked
         }
         // 事务成功后才记录喂食时间戳，失败回滚则不占用每日额度
-        recordFeedTimestamp()
+        recordFeedTimestamp(catId)
         return newlyUnlocked
     }
 
@@ -211,12 +238,15 @@ class CatRepository(
      *
      * @param foodId 要消耗的食物 ID
      * @param affinityBonus 该食物提供的好感度加成
+     * @param catId 当前猫咪 ID，用于按猫咪独立计数每日喂食次数
      * @return 新解锁的成就列表（可能为空）
      */
     suspend fun feedCatWithFood(
         foodId: String,
-        affinityBonus: Int
+        affinityBonus: Int,
+        catId: Int?
     ): List<AffinityAchievementEntity> {
+        if (catId == null) return emptyList()
         val newlyUnlocked = db.withTransaction {
             foodInventoryDao.consumeOne(foodId, System.currentTimeMillis())
             userCatDao.incrementFeed(affinityBonus)
@@ -233,7 +263,7 @@ class CatRepository(
             newlyUnlocked
         }
         // 事务成功后才记录喂食时间戳，失败回滚则不占用每日额度
-        recordFeedTimestamp()
+        recordFeedTimestamp(catId)
         return newlyUnlocked
     }
 
@@ -244,4 +274,14 @@ class CatRepository(
     /** 获取所有成就 */
     suspend fun getAllAchievements(): List<AffinityAchievementEntity> =
         achievementDao.getAllAchievements()
+
+    /**
+     * 检查指定里程碑的成就是否已解锁
+     * 用于"解锁新伙伴"前置条件判断：只有解锁"初识之友"(milestone=10) 后才能添加第二只猫。
+     *
+     * @param milestone 成就里程碑值
+     * @return true 表示该成就已解锁（unlockedAt 不为 null）
+     */
+    suspend fun isAchievementUnlocked(milestone: Int): Boolean =
+        achievementDao.getUnlockedAt(milestone) != null
 }
