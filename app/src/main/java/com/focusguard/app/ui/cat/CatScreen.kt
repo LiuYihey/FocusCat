@@ -461,12 +461,14 @@ fun CatScreen(
 
                 state.achievements.forEach { achievement ->
                     val isUnlocked = achievement.unlockedAt != null
-                    // iOS 风格成就卡片：大圆角、微妙的色彩区分、解锁勾选徽章
+                    // 成熟单：成就卡片去掉外圈灰色粗边/阴影，内容直接落在其本身背景色上
+                    // 与"未解锁成就"卡片样式保持一致：同底色、无描边、扁平干净
                     AppCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 6.dp),
                         containerColor = cardColor,
+                        elevation = 0.dp,
                         radius = 14.dp
                     ) {
                         Row(

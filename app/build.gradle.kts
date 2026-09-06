@@ -13,9 +13,9 @@ android {
         applicationId = "com.focusguard.app"
         minSdk = 26
         targetSdk = 35
-        // FocusCat v1.0.1 - 去掉成就卡片灰色背景
-        versionCode = 2
-        versionName = "1.0.1"
+        // FocusCat v1.0.2 - 去掉成就卡片灰色粗边/阴影，样式与未解锁一致
+        versionCode = 3
+        versionName = "1.0.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
