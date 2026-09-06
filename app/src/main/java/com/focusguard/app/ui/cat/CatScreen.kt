@@ -466,7 +466,7 @@ fun CatScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 6.dp),
-                        containerColor = if (isUnlocked) accentColor.copy(alpha = 0.12f) else cardColor,
+                        containerColor = cardColor,
                         radius = 14.dp
                     ) {
                         Row(
