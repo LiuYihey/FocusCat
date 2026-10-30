@@ -13,9 +13,10 @@ android {
         applicationId = "com.focusguard.app"
         minSdk = 26
         targetSdk = 35
-        // FocusCat v1.0.0 - 正式发布版本（细微调整不递增版本号）
-        versionCode = 1
-        versionName = "1.0.0"
+        // FocusCat v1.2.0 - 正式发布版本
+        // v1.2.0：无障碍保活（ColorOS）、视频随机起点、反思弹窗选择题 + 使用时长豁免
+        versionCode = 120
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
