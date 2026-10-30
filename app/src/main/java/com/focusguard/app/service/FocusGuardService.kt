@@ -96,6 +96,9 @@ class FocusGuardService : android.app.Service() {
                 // 加载失败忽略，无障碍服务连接时会再次加载
             }
         }
+        // 需求 1+4：前台服务启动时确认保活任务已注册
+        // 服务常驻时进程存活，无障碍服务不会被解绑；服务被杀死后由保活任务重建进程
+        KeepAliveManager.schedule(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -232,7 +235,7 @@ class FocusGuardService : android.app.Service() {
                             // 过滤掉 <4.5s 的瞬态切换。
                             val isNonBlockedNonSelf = fg != packageName &&
                                 fg != "com.android.systemui" &&
-                                AppDetectionManager.shouldBlock(fg).not()
+                                AppDetectionManager.isBlockedTarget(fg).not()
                             if (isNonBlockedNonSelf) {
                                 nonBlockedForegroundCount++
                                 if (nonBlockedForegroundCount >= CLEAR_SESSION_THRESHOLD) {
@@ -292,6 +295,10 @@ class FocusGuardService : android.app.Service() {
         } catch (e: Exception) {
             // 重提升失败静默忽略（如服务已被销毁）
         }
+        // 需求 1+4：无障碍服务健康自检
+        // - 系统开关仍在但服务没连上 → 保活任务会重建进程并触发系统自动重绑
+        // - 系统开关已被关闭 → 发通知引导用户手动重新开启
+        KeepAliveManager.checkAccessibilityHealth(this)
     }
 
     /**

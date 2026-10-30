@@ -117,7 +117,11 @@ fun FocusScreen(
                 modifier = Modifier.fillMaxSize(),
                 loop = true,
                 videoResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
-                edgeFade = false  // 全屏背景视频无需边缘柔化
+                edgeFade = false,  // 全屏背景视频无需边缘柔化
+                // 需求 2：进入专注页从视频中段随机时刻开始播放，每次进入都是新的画面
+                randomStart = true,
+                // 需求 2：换猫时以品种 ID 标识内容，遮住上一只猫的残留画面
+                contentKey = userCat.breedId
             )
         }
 

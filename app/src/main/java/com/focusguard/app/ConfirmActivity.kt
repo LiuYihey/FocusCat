@@ -129,6 +129,14 @@ class ConfirmActivity : ComponentActivity() {
      */
     private var hasUserEnteredApp: Boolean = false
 
+    /**
+     * 用户在反思页选中的「使用时长」（分钟），需求 3
+     *
+     * >0 时，确认进入后写入临时豁免窗口：该时长内再次进入该应用不再弹窗，
+     * 时间到后自动恢复拦截并提醒。
+     */
+    private var selectedDurationMin: Int by mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -151,6 +159,8 @@ class ConfirmActivity : ComponentActivity() {
         targetPackage = pkg
         // 解析应用名（用户可读）
         displayAppName = getAppName(pkg)
+        // 需求 3：读取反思页选中的使用时长
+        selectedDurationMin = intent.getIntExtra(ReflectionActivity.EXTRA_SELECTED_DURATION_MIN, 0)
 
         viewModel.setTargetApp(pkg)
 
@@ -293,12 +303,15 @@ class ConfirmActivity : ComponentActivity() {
                             ConfirmPhase.CHOICE -> {
                                 ConfirmChoiceContent(
                                     targetAppName = displayAppName,
+                                    durationMin = selectedDurationMin,
                                     onConfirmEnter = {
                                         // 标记用户选择了进入应用，onStop 时保留 lastAppEnterPkg
                                         hasUserEnteredApp = true
                                         // 记录「进入应用」会话：作为 recurring quiz 计时起点，
                                         // 同时让 checkAndTrigger 在此期间对此包返回 false（防进入后立即重复弹窗）
-                                        AppDetectionManager.onAppEntered(targetPackage)
+                                        // 需求 3：传入用户选中的使用时长，
+                                        // 该时长内再次进入此应用不再弹窗，到期后自动恢复拦截提醒
+                                        AppDetectionManager.onAppEntered(targetPackage, selectedDurationMin)
                                         // 仅 finish() 即可：拦截页（ReflectionActivity → ConfirmActivity）
                                         // 以 NEW_TASK 启动于独立 task，用户原本打开的目标应用仍留在背后的 task。
                                         // ConfirmActivity finish 后系统自动将该 task 拉回前台，目标应用自然显现。
@@ -332,6 +345,8 @@ class ConfirmActivity : ComponentActivity() {
         if (pkg.isNotBlank()) {
             targetPackage = pkg
             displayAppName = getAppName(pkg)
+            // 需求 3：新拦截周期重置选中的使用时长，避免沿用上一次的豁免时长
+            selectedDurationMin = intent.getIntExtra(ReflectionActivity.EXTRA_SELECTED_DURATION_MIN, 0)
             // 重置进入标志：新拦截周期开始
             hasUserEnteredApp = false
             // 重置全部状态：取消旧发放协程，清空 isExiting/grantedFood
@@ -379,10 +394,13 @@ class ConfirmActivity : ComponentActivity() {
 /**
  * 确认/退出选择页
  * 颜色统一引用 MaterialTheme.colorScheme
+ *
+ * @param durationMin 用户在反思页选中的使用时长（分钟），>0 时展示免打扰提示
  */
 @Composable
 private fun ConfirmChoiceContent(
     targetAppName: String,
+    durationMin: Int = 0,
     onConfirmEnter: () -> Unit,
     onExitWithFood: () -> Unit
 ) {
@@ -435,6 +453,17 @@ private fun ConfirmChoiceContent(
             fontSize = 15.sp,
             textAlign = TextAlign.Center
         )
+
+        // 需求 3：告知用户本次免打扰时长，到期后会再提醒
+        if (durationMin > 0) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "接下来 $durationMin 分钟不会再打扰你",
+                color = accentColor.copy(alpha = 0.85f),
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center
+            )
+        }
 
         Spacer(modifier = Modifier.height(40.dp))
 

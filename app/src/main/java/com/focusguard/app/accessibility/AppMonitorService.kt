@@ -9,6 +9,7 @@ import com.focusguard.app.ReflectionActivity
 import com.focusguard.app.data.local.AppDatabase
 import com.focusguard.app.detection.AppDetectionManager
 import com.focusguard.app.service.FocusGuardService
+import com.focusguard.app.service.KeepAliveManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -65,7 +66,11 @@ class AppMonitorService : AccessibilityService() {
         // hasUserOperated 检查失效，用户手动关闭守护后会被自动重新打开。
         // 正确顺序：先 init 恢复 SharedPreferences，再通知连接状态，hasUserOperated 才能正确判断。
         AppDetectionManager.init(this)
+        // 需求 1+4：服务重新连上 → 清除「已被系统关闭」标记，并重排保活任务
+        AppDetectionManager.markAccessibilityRestored()
         AppDetectionManager.setAccessibilityConnected(true)
+        // 重排保活任务：进程重建后 JobScheduler / AlarmManager 需要重新确认已注册
+        KeepAliveManager.schedule(this)
         // 从数据库加载拦截列表
         serviceScope.launch {
             val db = AppDatabase.getInstance(this@AppMonitorService)
@@ -198,11 +203,17 @@ class AppMonitorService : AccessibilityService() {
         // 改为 15 秒后若仍未重新绑定，才真正上报断连。
         pendingDisconnectReport = Runnable {
             AppDetectionManager.setAccessibilityConnected(false)
+            // 需求 1+4：断连后立即做一次无障碍健康自检
+            // - 若系统开关仍开启 → 说明只是进程被杀，保活任务会重建进程并自动重绑
+            // - 若系统开关已被关闭 → 立刻通知用户手动重新开启
+            KeepAliveManager.checkAccessibilityHealth(this@AppMonitorService)
             pendingDisconnectReport = null
         }
         mainHandler.postDelayed(pendingDisconnectReport!!, DISCONNECT_REPORT_DELAY_MS)
         watchdogJob?.cancel()
         serviceScope.cancel()
+        // 需求 1+4：断连即重排保活任务，尽早恢复无障碍绑定
+        KeepAliveManager.schedule(this)
         return super.onUnbind(intent)
     }
 

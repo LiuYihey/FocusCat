@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -22,6 +24,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +49,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
@@ -145,8 +149,8 @@ fun ReflectionQuestionsScreen(
         EditQuestionDialog(
             editingQuestion = state.editingQuestion,
             onDismiss = { viewModel.dismissDialog() },
-            onSave = { text, placeholder ->
-                viewModel.saveQuestion(text, placeholder)
+            onSave = { text, placeholder, type, options ->
+                viewModel.saveQuestion(text, placeholder, type, options)
             }
         )
     }
@@ -191,10 +195,22 @@ private fun QuestionCard(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 )
-                if (question.placeholder.isNotBlank()) {
+                // 题型标签 + 选项预览（需求 3）
+                val typeLabel = when (question.questionType) {
+                    ReflectionQuestionEntity.TYPE_CHOICE -> "选择题"
+                    ReflectionQuestionEntity.TYPE_DURATION -> "使用时长"
+                    else -> "开放问答"
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "$typeLabel · ${question.options.size} 个选项",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                if (question.options.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "提示：${question.placeholder}",
+                        text = question.options.joinToString(" / "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -204,7 +220,7 @@ private fun QuestionCard(
                     Text(
                         text = "自定义",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -233,18 +249,32 @@ private fun QuestionCard(
 
 /**
  * 添加/编辑问题对话框
+ *
+ * 需求 3：支持自定义题目类型与选项列表
+ * - 开放问答：保留输入框提示
+ * - 选择题：至少 2 个选项，点击即答
+ * - 使用时长：选项中的数字代表分钟数
  */
 @Composable
 private fun EditQuestionDialog(
     editingQuestion: ReflectionQuestionEntity?,
     onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit
+    onSave: (String, String, String, List<String>) -> Unit
 ) {
     var questionText by remember(editingQuestion) {
         mutableStateOf(editingQuestion?.questionText ?: "")
     }
     var placeholder by remember(editingQuestion) {
         mutableStateOf(editingQuestion?.placeholder ?: "")
+    }
+    var questionType by remember(editingQuestion) {
+        mutableStateOf(editingQuestion?.questionType ?: ReflectionQuestionEntity.TYPE_CHOICE)
+    }
+    var options by remember(editingQuestion) {
+        mutableStateOf<List<String>>(
+            editingQuestion?.options?.toMutableList()
+                ?: mutableListOf("消遣一下", "完成具体任务", "只是想看看", "其他")
+        )
     }
 
     AlertDialog(
@@ -253,7 +283,7 @@ private fun EditQuestionDialog(
             Text(if (editingQuestion == null) "添加问题" else "编辑问题")
         },
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
                     value = questionText,
                     onValueChange = { questionText = it },
@@ -262,18 +292,102 @@ private fun EditQuestionDialog(
                     singleLine = false,
                     minLines = 2
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = placeholder,
-                    onValueChange = { placeholder = it },
-                    label = { Text("输入框提示（可选）") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 题型选择
+                Text(
+                    text = "题型",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        ReflectionQuestionEntity.TYPE_CHOICE to "选择题",
+                        ReflectionQuestionEntity.TYPE_DURATION to "使用时长",
+                        ReflectionQuestionEntity.TYPE_OPEN to "开放问答"
+                    ).forEach { (type, label) ->
+                        FilterChip(
+                            selected = questionType == type,
+                            onClick = { questionType = type },
+                            label = { Text(label, fontSize = 13.sp) }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (questionType == ReflectionQuestionEntity.TYPE_OPEN) {
+                    OutlinedTextField(
+                        value = placeholder,
+                        onValueChange = { placeholder = it },
+                        label = { Text("输入框提示（可选）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                } else {
+                    // 选项编辑：每行一个输入框 + 删除按钮
+                    Text(
+                        text = if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
+                            "时长选项（数字为分钟数，如 15 或 1 小时）"
+                        } else {
+                            "选项（至少 2 个）"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    options.forEachIndexed { index, option ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = option,
+                                onValueChange = { newValue ->
+                                    options = options.toMutableList().also {
+                                        it[index] = newValue
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                placeholder = {
+                                    Text(
+                                        text = if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
+                                            "如 15 分钟"
+                                        } else {
+                                            "选项文案"
+                                        },
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            )
+                            IconButton(
+                                onClick = {
+                                    options = options.toMutableList().also {
+                                        it.removeAt(index)
+                                    }
+                                },
+                                enabled = options.size > 2
+                            ) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = "删除选项",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    TextButton(onClick = {
+                        options = options + "新选项"
+                    }) {
+                        Text("+ 添加选项", fontSize = 13.sp)
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(questionText, placeholder) }) {
+            TextButton(onClick = { onSave(questionText, placeholder, questionType, options) }) {
                 Text("保存")
             }
         },

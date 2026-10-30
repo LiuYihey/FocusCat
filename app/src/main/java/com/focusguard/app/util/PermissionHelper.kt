@@ -197,6 +197,59 @@ object PermissionHelper {
             }
         }
         // 全部失败，回退到应用详情页（用户可在此查找电池/自启动选项）
+        requestAppDetails(context)
+    }
+
+    /**
+     * 跳转到 ColorOS「允许后台运行 / 完全后台行为」设置页
+     *
+     * ColorOS 把后台保活拆成了多层开关，缺一不可：
+     * - 自启动管理：允许应用自启
+     * - 允许后台运行 / 完全后台行为：允许应用在后台持续运行（最关键的一层）
+     * - 电池优化白名单：防止系统直接冻结进程
+     *
+     * 各版本 ColorOS 的 Activity 名称不一致，故按优先级依次尝试，
+     * 全部失败回退到应用详情页。
+     */
+    fun requestColorOsBackgroundRun(context: Context) {
+        val intents = listOf(
+            // ColorOS 13+ 允许后台运行 / 完全后台行为（自启动管理里的二级列表）
+            Intent().setClassName(
+                "com.coloros.safecenter",
+                "com.coloros.safecenter.permission.startup.StartupAppListActivity"
+            ),
+            // ColorOS 12 及更早的允许后台运行列表
+            Intent().setClassName(
+                "com.coloros.safecenter",
+                "com.coloros.safecenter.startupapp.startupappinfo.StartupAppInfoActivity"
+            ),
+            // 手机管家 → 应用耗电管理（后台高耗电 / 允许后台运行）
+            Intent().setClassName(
+                "com.oplus.safecenter",
+                "com.oplus.safecenter.permission.startup.StartupAppListActivity"
+            ),
+            // 一加 / realme 合并包名下的保活页
+            Intent().setClassName(
+                "com.coloros.oppoguardelf",
+                "com.coloros.powermanager.fuelgaue.PowerUsageModelActivity"
+            )
+        )
+        for (intent in intents) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                return
+            } catch (e: Exception) {
+                // 该版本没有此页面，尝试下一个
+            }
+        }
+        requestAppDetails(context)
+    }
+
+    /**
+     * 跳转到应用详情页（电池优化 / 后台运行设置的通用入口）
+     */
+    fun requestAppDetails(context: Context) {
         try {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.parse("package:${context.packageName}")

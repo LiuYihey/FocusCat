@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import com.focusguard.app.data.repository.AppRepositoryImpl
 import com.focusguard.app.service.FocusGuardService
+import com.focusguard.app.service.KeepAliveManager
 import com.focusguard.app.service.ServiceRestartReceiver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +30,9 @@ object AppDetectionManager {
 
     /** 再次提醒间隔（分钟）的存储 Key，0=关闭 */
     private const val KEY_RECURRING_INTERVAL_MIN = "recurring_interval_min"
+
+    /** 临时豁免窗口的存储 Key 前缀（需求 3），完整键 = 前缀 + 包名 */
+    private const val KEY_EXEMPTION_PREFIX = "exempt_until_"
 
     /** 再次提醒间隔默认值（分钟）—— 每使用 30 分钟再次弹出问答 */
     private const val DEFAULT_RECURRING_INTERVAL_MIN = 30
@@ -65,6 +69,33 @@ object AppDetectionManager {
     var isProtectionEnabled: Boolean = false
         private set
 
+    /**
+     * 无障碍服务是否被系统/用户关闭（需求 1+4）
+     *
+     * 与 isAccessibilityConnected 区分：
+     * - isAccessibilityConnected=false 仅表示当前进程没有连上（可能只是被 ROM 杀进程后未重绑）
+     * - isAccessibilityDisabled=true 表示系统设置里的无障碍开关已被关闭，
+     *   此时 Android 不允许 App 自行开启，只能引导用户手动恢复
+     */
+    private val _isAccessibilityDisabled = MutableStateFlow(false)
+    val isAccessibilityDisabled: StateFlow<Boolean> = _isAccessibilityDisabled.asStateFlow()
+
+    /**
+     * 标记无障碍服务已被系统关闭
+     * 由 KeepAliveManager.checkAccessibilityHealth 在检测到系统设置里的开关已关闭时调用
+     */
+    fun markAccessibilityDisabled() {
+        _isAccessibilityDisabled.value = true
+    }
+
+    /**
+     * 标记无障碍服务已恢复连接
+     * AppMonitorService.onServiceConnected 时调用，清除「已关闭」标记
+     */
+    fun markAccessibilityRestored() {
+        _isAccessibilityDisabled.value = false
+    }
+
     /** 上次触发的应用包名（用于去重） */
     private var lastTriggeredPkg: String? = null
 
@@ -93,6 +124,15 @@ object AppDetectionManager {
     /** 用户进入 lastAppEnterPkg 的时间戳（毫秒） */
     @Volatile
     private var lastAppEnterTimeMs: Long = 0L
+
+    /**
+     * 临时豁免窗口（需求 3）
+     *
+     * Key = 被约束应用包名，Value = 豁免截止时间戳（毫秒）。
+     * 用户在弹窗中选择「本次使用时长」并确认进入后写入，
+     * 该时长内再次进入该应用不再弹窗；到期后自动移除并恢复拦截提醒。
+     */
+    private val temporaryExemptUntil: MutableMap<String, Long> = mutableMapOf()
 
     /** 再次提醒间隔（分钟），0=关闭。默认 30，由设置页写入 */
     @Volatile
@@ -158,6 +198,8 @@ object AppDetectionManager {
         isProtectionEnabled = prefs?.getBoolean(KEY_PROTECTION_ENABLED, false) ?: false
         recurringIntervalMin = prefs?.getInt(KEY_RECURRING_INTERVAL_MIN, DEFAULT_RECURRING_INTERVAL_MIN)
             ?: DEFAULT_RECURRING_INTERVAL_MIN
+        // 恢复临时豁免窗口（需求 3）：进程被杀后重启，豁免窗口依然有效
+        restoreExemptions()
         // 注意：lastAppEnterPkg / lastAppEnterTimeMs 不持久化
         // 这两个变量的语义是「用户当前在此应用内」，进程被杀后无法确定用户是否仍在该应用内。
         // 若持久化恢复，进程被杀期间用户离开又回来时，checkAndTrigger 会因 pkg == lastAppEnterPkg
@@ -182,7 +224,95 @@ object AppDetectionManager {
         if (!isProtectionEnabled) return false
         if (packageName.isBlank()) return false
         synchronized(this) {
+            // 临时豁免窗口内不拦截（用户已明确选择本次使用时长）
+            if (isInExemptionWindow(packageName)) return false
             return blockedPackages.contains(packageName)
+        }
+    }
+
+    /**
+     * 纯拦截列表判断（不考虑守护开关与临时豁免）
+     *
+     * 用途：前台服务的「离开应用 → 清空进入会话」去抖判断。
+     * 必须用本方法而非 shouldBlock：豁免窗口内 shouldBlock 返回 false，
+     * 会把用户仍停留在被约束应用的状态误判为「已离开」而清空会话，
+     * 导致豁免到期后无法准确触发提醒、实时使用时长也会丢失。
+     */
+    fun isBlockedTarget(packageName: String): Boolean {
+        synchronized(this) { return blockedPackages.contains(packageName) }
+    }
+
+    /**
+     * 是否处于临时豁免窗口内
+     * 窗口到期时自动移除并触发一次提醒（恢复拦截）
+     *
+     * 到期时清空 lastAppEnterPkg / lastTriggeredPkg：
+     * 清空 lastAppEnterPkg 是为了让 checkAndTrigger 的「pkg == lastAppEnterPkg」分支
+     * 不再命中，从而在下一轮轮询（1.5s 内）立即弹出提醒；
+     * 否则用户停留在该应用里会一直等不到 recurring 提醒。
+     */
+    private fun isInExemptionWindow(packageName: String): Boolean {
+        val until = temporaryExemptUntil[packageName] ?: return false
+        if (System.currentTimeMillis() < until) return true
+        // 已到期：移除豁免并恢复拦截（下次 checkAndTrigger 即可弹窗提醒）
+        temporaryExemptUntil.remove(packageName)
+        prefs?.edit()?.remove(exemptionKey(packageName))?.apply()
+        lastAppEnterPkg = null
+        lastAppEnterTimeMs = 0L
+        lastTriggeredPkg = null
+        lastTriggerTime = 0L
+        return false
+    }
+
+    /**
+     * 设置临时豁免窗口（需求 3）
+     *
+     * 用户在弹窗中选择了「本次使用时长」，并确认进入应用后调用。
+     * 在该时长内再次进入该应用不再弹窗；时间到后自动恢复拦截并提醒。
+     *
+     * @param pkg 目标应用包名
+     * @param durationMinutes 允许使用的分钟数，<=0 表示不设置豁免
+     */
+    fun setTemporaryExemption(pkg: String, durationMinutes: Int) {
+        if (pkg.isBlank() || durationMinutes <= 0) return
+        val until = System.currentTimeMillis() + durationMinutes * 60_000L
+        synchronized(this) {
+            temporaryExemptUntil[pkg] = until
+            // 持久化，保证进程被杀后豁免窗口依然有效
+            prefs?.edit()?.putLong(exemptionKey(pkg), until)?.apply()
+        }
+    }
+
+    /**
+     * 获取剩余豁免分钟数（向上取整），无豁免或已过期返回 0
+     */
+    fun getExemptionRemainingMin(pkg: String): Int {
+        val until = synchronized(this) { temporaryExemptUntil[pkg] } ?: return 0
+        val remain = until - System.currentTimeMillis()
+        if (remain <= 0) return 0
+        return ((remain + 59_999L) / 60_000L).toInt()
+    }
+
+    /**
+     * 豁免窗口的 SharedPreferences 键
+     */
+    private fun exemptionKey(pkg: String) = "$KEY_EXEMPTION_PREFIX$pkg"
+
+    /**
+     * 从持久化存储恢复临时豁免窗口
+     * 在 init 中调用：进程被杀后重启时豁免窗口依然有效
+     */
+    private fun restoreExemptions() {
+        val all = prefs?.all ?: return
+        val now = System.currentTimeMillis()
+        all.forEach { (key, value) ->
+            if (!key.startsWith(KEY_EXEMPTION_PREFIX)) return@forEach
+            val until = value as? Long ?: return@forEach
+            if (until > now) {
+                temporaryExemptUntil[key.removePrefix(KEY_EXEMPTION_PREFIX)] = until
+            } else {
+                prefs?.edit()?.remove(key)?.apply()
+            }
         }
     }
 
@@ -204,10 +334,15 @@ object AppDetectionManager {
             // 修复 C：注册 AlarmManager 第三方守护者，独立于 app 进程
             // 确保前台服务被 ROM 杀死后能被定时拉起，轮询/pending trigger 消费不中断
             appContext?.let { ServiceRestartReceiver.schedule(it) }
+            // 需求 1+4：启动 JobScheduler + AlarmManager 双路保活，
+            // 进程被 ColorOS 杀掉后由系统拉起并自动重绑无障碍服务
+            appContext?.let { KeepAliveManager.schedule(it) }
         } else {
             stopForegroundService()
             // 修复 C：取消闹钟，守护关闭后不再定时拉起服务
             appContext?.let { ServiceRestartReceiver.cancel(it) }
+            // 需求 1+4：取消保活任务，避免守护关闭后仍被系统拉起
+            appContext?.let { KeepAliveManager.cancel(it) }
             // 清空所有运行时拦截状态，避免残留影响下次开启
             synchronized(this) {
                 isQuizShowing = false
@@ -218,6 +353,25 @@ object AppDetectionManager {
                 lastAppEnterTimeMs = 0L
                 pendingTrigger = null
             }
+            // 清空临时豁免窗口（需求 3）：守护关闭后不应再保留免打扰状态
+            clearExemptions()
+        }
+    }
+
+    /**
+     * 清空所有临时豁免窗口（含持久化）
+     * 守护关闭时调用，确保重新开启后不会残留旧的豁免状态
+     */
+    private fun clearExemptions() {
+        synchronized(this) {
+            temporaryExemptUntil.clear()
+            val editor = prefs?.edit() ?: return
+            prefs?.all?.keys?.forEach { key ->
+                if (key.startsWith(KEY_EXEMPTION_PREFIX)) {
+                    editor.remove(key)
+                }
+            }
+            editor.apply()
         }
     }
 
@@ -461,14 +615,22 @@ object AppDetectionManager {
      * 用户在确认页选择「还是进入 X」时调用
      * 记录进入的应用包名与时间，作为 recurring quiz 计时起点，
      * 同时让 checkAndTrigger 在此期间对此包返回 false（防进入后立即重复弹窗）
+     *
+     * @param pkg 目标应用包名
+     * @param durationMinutes 用户在弹窗中选择的「本次使用时长」（分钟）。
+     *        >0 时开启临时豁免窗口：该时长内再次进入该应用不再弹窗，到期后自动恢复提醒。
      */
-    fun onAppEntered(pkg: String) {
+    fun onAppEntered(pkg: String, durationMinutes: Int = 0) {
         synchronized(this) {
             lastAppEnterPkg = pkg
             lastAppEnterTimeMs = System.currentTimeMillis()
             // 进入应用视为本「拦截会话」已消化，重置去重以便后续正常触发
             lastTriggeredPkg = null
             lastTriggerTime = 0L
+        }
+        // 需求 3：用户主动选择的使用时长 → 写入临时豁免窗口
+        if (durationMinutes > 0) {
+            setTemporaryExemption(pkg, durationMinutes)
         }
     }
 

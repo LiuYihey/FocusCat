@@ -31,5 +31,9 @@ class BootReceiver : BroadcastReceiver() {
         // 修复 C：恢复 AlarmManager 守护者闹钟
         // 开机后所有闹钟被清空，需重新注册以确保前台服务被杀后能定时拉起
         ServiceRestartReceiver.schedule(context)
+        // 需求 1+4：恢复 JobScheduler 保活任务
+        // JobScheduler 的 persisted 任务理论上重启后仍在，但系统可能在"自动启动"
+        // 未放行时不执行，这里显式重排一次确保可靠
+        KeepAliveManager.schedule(context)
     }
 }

@@ -10,6 +10,10 @@ import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +29,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.SelfImprovement
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.runtime.Composable
@@ -51,6 +57,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +75,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.focusguard.app.detection.AppDetectionManager
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.focusguard.app.ui.reflection.ReflectionUiState
 import com.focusguard.app.ui.reflection.ReflectionViewModel
 import com.focusguard.app.ui.theme.FocusGuardTheme
@@ -169,6 +178,9 @@ class ReflectionActivity : ComponentActivity() {
                                 val confirmIntent = Intent(this@ReflectionActivity, ConfirmActivity::class.java).apply {
                                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     putExtra(EXTRA_TARGET_PACKAGE, currentTargetPackage)
+                                    // 需求 3：把用户选中的「使用时长」透传给确认页，
+                                    // 确认进入后据此写入临时豁免窗口
+                                    putExtra(EXTRA_SELECTED_DURATION_MIN, state.selectedDurationMinutes)
                                 }
                                 // 标记跳转中，onDestroy 不调用 onQuizDismissed
                                 // 改由 ConfirmActivity 管理 isQuizShowing 状态
@@ -228,6 +240,9 @@ class ReflectionActivity : ComponentActivity() {
                                 elapsedMin = elapsedMin,
                                 onAnswerChange = { index, answer ->
                                     viewModel.updateAnswer(index, answer)
+                                },
+                                onOptionSelect = { index, optionIndex ->
+                                    viewModel.selectOption(index, optionIndex)
                                 },
                                 onSubmit = {
                                     viewModel.submitAnswers()
@@ -295,6 +310,8 @@ class ReflectionActivity : ComponentActivity() {
         const val EXTRA_IS_RECURRING = "extra_is_recurring"
         /** recurring 场景下已使用的分钟数，用于文案展示 */
         const val EXTRA_ELAPSED_MIN = "extra_elapsed_min"
+        /** 用户在「使用时长」题中选择的分钟数，透传给确认页写入临时豁免窗口 */
+        const val EXTRA_SELECTED_DURATION_MIN = "extra_selected_duration_min"
     }
 }
 
@@ -377,6 +394,9 @@ private fun EmptyQuestionsContent(
 /**
  * 反思问答界面主体内容 - 逐步展示问题，带进度指示
  * 颜色统一引用 MaterialTheme.colorScheme
+ *
+ * 需求 3：题目改为选择题，点击选项即完成作答；
+ * 「使用时长」题以选项形式呈现（5/15/30/60 分钟），选中后进入下一步。
  */
 @Composable
 private fun ReflectionContent(
@@ -385,6 +405,7 @@ private fun ReflectionContent(
     isRecurring: Boolean,
     elapsedMin: Int,
     onAnswerChange: (Int, String) -> Unit,
+    onOptionSelect: (Int, Int) -> Unit,
     onSubmit: () -> Unit
 ) {
     // 当前展示到第几个问题（逐步揭示）
@@ -393,6 +414,7 @@ private fun ReflectionContent(
     var currentStep by remember(state.targetApp) { mutableStateOf(0) }
     val totalQuestions = state.questions.size
     val hapticFeedback = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
 
     // 主题色引用
     val textColor = MaterialTheme.colorScheme.onBackground
@@ -522,51 +544,79 @@ private fun ReflectionContent(
                                 fontWeight = FontWeight.Medium
                             )
                             Spacer(modifier = Modifier.height(12.dp))
-                            OutlinedTextField(
-                                value = item.answer,
-                                onValueChange = { onAnswerChange(index, it) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    // 用 heightIn 而非 height：supportingText 会被算入容器高度，
-                                    // height 会挤压输入区；heightIn(min) 让 supportingText 在容器外渲染
-                                    .heightIn(min = 100.dp),
-                                placeholder = {
-                                    Text(
-                                        text = item.question.placeholder,
-                                        color = dimColor,
-                                        fontSize = 14.sp
+
+                            if (item.isChoice) {
+                                // 需求 3：选择题 —— 点击即答，无需输入文字
+                                item.options.forEachIndexed { optionIndex, optionText ->
+                                    ChoiceOptionRow(
+                                        text = optionText,
+                                        selected = item.selectedOptionIndex == optionIndex,
+                                        onClick = {
+                                            hapticFeedback.performHapticFeedback(
+                                                HapticFeedbackType.TextHandleMove
+                                            )
+                                            onOptionSelect(index, optionIndex)
+                                            // 点击后自动推进到下一题（最后题停留，等待提交）
+                                            if (index < totalQuestions - 1) {
+                                                coroutineScope.launch {
+                                                    delay(220)
+                                                    if (currentStep == index) currentStep = index + 1
+                                                }
+                                            }
+                                        }
                                     )
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = accentColor,
-                                    unfocusedBorderColor = dimColor.copy(alpha = 0.5f),
-                                    cursorColor = accentColor,
-                                    focusedTextColor = textColor,
-                                    unfocusedTextColor = textColor,
-                                    focusedContainerColor = Color.White.copy(alpha = 0.05f),
-                                    unfocusedContainerColor = Color.White.copy(alpha = 0.03f)
-                                ),
-                                supportingText = {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                }
+                                // 使用时长题的补充说明
+                                if (item.question.questionType ==
+                                    com.focusguard.app.data.local.entity.ReflectionQuestionEntity.TYPE_DURATION
+                                ) {
                                     Text(
-                                        text = "${item.answer.length} 字",
+                                        text = "这段时间内不会再打扰你，时间到了会再提醒",
                                         color = dimColor,
-                                        fontSize = 11.sp,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        textAlign = TextAlign.End
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
                                     )
                                 }
-                            )
-                            // 当前问题回答后，显示引导提示并允许进入下一题
-                            if (index == currentStep && item.answer.isNotBlank() && index < totalQuestions - 1) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "准备好了就继续下一题",
-                                    color = accentColor.copy(alpha = 0.7f),
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(start = 4.dp)
+                            } else {
+                                // 开放问答（兼容历史自定义问题）
+                                OutlinedTextField(
+                                    value = item.answer,
+                                    onValueChange = { onAnswerChange(index, it) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        // 用 heightIn 而非 height：supportingText 会被算入容器高度，
+                                        // height 会挤压输入区；heightIn(min) 让 supportingText 在容器外渲染
+                                        .heightIn(min = 100.dp),
+                                    placeholder = {
+                                        Text(
+                                            text = item.question.placeholder,
+                                            color = dimColor,
+                                            fontSize = 14.sp
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = accentColor,
+                                        unfocusedBorderColor = dimColor.copy(alpha = 0.5f),
+                                        cursorColor = accentColor,
+                                        focusedTextColor = textColor,
+                                        unfocusedTextColor = textColor,
+                                        focusedContainerColor = Color.White.copy(alpha = 0.05f),
+                                        unfocusedContainerColor = Color.White.copy(alpha = 0.03f)
+                                    ),
+                                    supportingText = {
+                                        Text(
+                                            text = "${item.answer.length} 字",
+                                            color = dimColor,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textAlign = TextAlign.End
+                                        )
+                                    }
                                 )
                             }
+
                             // 上一题/下一题按钮组（当前题时显示）
                             if (index == currentStep) {
                                 Row(
@@ -590,7 +640,8 @@ private fun ReflectionContent(
                                         Spacer(modifier = Modifier.size(1.dp))
                                     }
                                     // 下一题按钮：已回答当前题且不是最后一题时显示
-                                    if (index < totalQuestions - 1 && item.answer.isNotBlank()) {
+                                    // 选择题会自动推进，此按钮仅在开放问答或未作答时出现
+                                    if (index < totalQuestions - 1 && item.isAnswered && !item.isChoice) {
                                         TextButton(
                                             onClick = {
                                                 hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -612,9 +663,6 @@ private fun ReflectionContent(
             }
         }
 
-        // 注：已移除自动跳题逻辑（原 2 字符 / 600ms 自动跳转会打断用户思考）
-        // 用户回答完当前题后通过"下一题"按钮推进，全部回答后才能提交
-
         Spacer(modifier = Modifier.height(8.dp))
 
         // 错误提示 - 用 ErrorText (#6B5B3E) 替代 error (#9C7A82)：14sp 在白底达 AA 4.5:1
@@ -628,7 +676,7 @@ private fun ReflectionContent(
         }
 
         // 进入应用按钮（必须回答所有问题后才能提交）
-        val allAnswered = state.questions.isNotEmpty() && state.questions.all { it.answer.isNotBlank() }
+        val allAnswered = state.questions.isNotEmpty() && state.questions.all { it.isAnswered }
         val canSubmit = allAnswered
         // 禁用→启用 scale 平滑过渡，避免 0.95↔1.0 瞬间跳变的「啪」感
         val submitScale by androidx.compose.animation.core.animateFloatAsState(
@@ -691,5 +739,59 @@ private fun ReflectionContent(
         )
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+/**
+ * 选择题选项行（需求 3）
+ *
+ * 点击整行即选中，选中态用蜜糖橙描边 + 淡橙底 + 对勾图标，
+ * 触控目标 ≥52dp，符合移动端可点性要求。
+ */
+@Composable
+private fun ChoiceOptionRow(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val accentColor = MaterialTheme.colorScheme.primary
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val dimColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .background(
+                color = if (selected) accentColor.copy(alpha = 0.12f) else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .border(
+                border = BorderStroke(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) accentColor else dimColor.copy(alpha = 0.35f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = text,
+            color = if (selected) textColor else dimColor,
+            fontSize = 16.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            modifier = Modifier.weight(1f)
+        )
+        if (selected) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = "已选中",
+                tint = accentColor,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }

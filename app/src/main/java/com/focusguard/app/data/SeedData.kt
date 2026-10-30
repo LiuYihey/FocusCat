@@ -104,8 +104,10 @@ object SeedData {
     }
 
     /**
-     * 获取默认反思问题种子数据
-     * 2 个目标强化问题，无标准答案
+     * 获取默认反思问题种子数据（需求 3：改为选择题）
+     *
+     * 第 1 题：目标强化选择题 —— 点击即答，降低使用门槛
+     * 第 2 题：使用时长选择 —— 决定本次进入后的免打扰时长
      */
     fun getSeedReflectionQuestions(): List<ReflectionQuestionEntity> {
         return listOf(
@@ -114,14 +116,18 @@ object SeedData {
                 order = 1,
                 isActive = true,
                 isCustom = false,
-                placeholder = "写下你此刻的真实目的..."
+                placeholder = "",
+                questionType = ReflectionQuestionEntity.TYPE_CHOICE,
+                optionsJson = """["消遣一下","完成具体任务","只是想看看","其他"]"""
             ),
             ReflectionQuestionEntity(
-                questionText = "你今天的 todo list 还有哪些？",
+                questionText = "这次打算使用多久？",
                 order = 2,
                 isActive = true,
                 isCustom = false,
-                placeholder = "列出今天还没完成的任务..."
+                placeholder = "",
+                questionType = ReflectionQuestionEntity.TYPE_DURATION,
+                optionsJson = """["5 分钟","15 分钟","30 分钟","1 小时"]"""
             )
         )
     }

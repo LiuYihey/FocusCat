@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.focusguard.app.data.local.entity.ReflectionAnswerEntity
 import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
 import com.focusguard.app.data.repository.ReflectionRepository
+import com.focusguard.app.util.ReflectionOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -17,11 +18,42 @@ import javax.inject.Inject
 
 /**
  * 单个反思问题的 UI 状态
+ *
+ * 需求 3：选择题点击即答 —— selectedOptionIndex 记录选中的选项下标；
+ * 开放问答（历史数据）仍用 answer 文本。
  */
 data class ReflectionItemState(
     val question: ReflectionQuestionEntity,
-    val answer: String = ""
-)
+    /** 开放问答的文本回答 */
+    val answer: String = "",
+    /** 选择题选中的选项下标，-1 表示未选择 */
+    val selectedOptionIndex: Int = -1,
+    /** 解析后的选项列表（选择题/使用时长题） */
+    val options: List<String> = emptyList()
+) {
+    /**
+     * 是否为点击即答的题型
+     * 选项为空时降级为开放问答，避免出现「无选项可选」的僵死状态
+     */
+    val isChoice: Boolean
+        get() = question.questionType != ReflectionQuestionEntity.TYPE_OPEN && options.isNotEmpty()
+
+    /** 该题是否已完成作答 */
+    val isAnswered: Boolean
+        get() = if (isChoice) {
+            selectedOptionIndex in options.indices
+        } else {
+            answer.isNotBlank()
+        }
+
+    /** 当前作答文本（选择题返回选中选项文案） */
+    val answerText: String
+        get() = if (isChoice) {
+            options.getOrNull(selectedOptionIndex) ?: ""
+        } else {
+            answer
+        }
+}
 
 /**
  * 反思问答界面的 UI 状态
@@ -38,13 +70,17 @@ data class ReflectionUiState(
     /** 是否正在提交中（防双击重复保存） */
     val isSubmitting: Boolean = false,
     /** 错误提示 */
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /** 用户选中的使用时长（分钟），0 表示未选择或无时长题 */
+    val selectedDurationMinutes: Int = 0
 )
 
 /**
  * 反思问答 ViewModel
  * 管理反思问题的加载和用户回答的提交
- * 问题无标准答案，仅做必填校验
+ *
+ * 需求 3：题目改为选择题，点击选项即完成作答；
+ * 「使用时长」题的选中结果解析为分钟数，供确认页写入临时豁免窗口。
  */
 @HiltViewModel
 class ReflectionViewModel @Inject constructor(
@@ -82,16 +118,33 @@ class ReflectionViewModel @Inject constructor(
                 isSubmitted = false,
                 isSubmitting = false,
                 errorMessage = null,
-                questions = emptyList()
+                questions = emptyList(),
+                selectedDurationMinutes = 0
             )
         }
         loadJob = viewModelScope.launch {
             try {
                 val questions = reflectionRepository.getActiveQuestions()
-                val items = questions.map { ReflectionItemState(question = it) }
+                val items = questions.map { entity ->
+                    ReflectionItemState(
+                        question = entity,
+                        options = ReflectionOptions.parse(entity.optionsJson)
+                    )
+                }
+                // 需求 3：必须存在一道「使用时长」题，否则无法确定免打扰时长。
+                // 用户删光题目或自建问题时，用内置默认时长题兜底，保证功能始终可用。
+                // 顺序保持 DB 的 order 字段：默认种子下时长题正是第 2 题。
+                val withDuration = if (items.any { it.question.questionType == ReflectionQuestionEntity.TYPE_DURATION }) {
+                    items
+                } else {
+                    items + ReflectionItemState(
+                        question = DEFAULT_DURATION_QUESTION,
+                        options = ReflectionOptions.parse(DEFAULT_DURATION_QUESTION.optionsJson)
+                    )
+                }
                 _state.update {
                     it.copy(
-                        questions = items,
+                        questions = withDuration,
                         isLoading = false
                     )
                 }
@@ -110,7 +163,7 @@ class ReflectionViewModel @Inject constructor(
     }
 
     /**
-     * 更新某个问题的回答
+     * 更新某个问题的回答（开放问答）
      */
     fun updateAnswer(index: Int, answer: String) {
         _state.update { state ->
@@ -123,10 +176,26 @@ class ReflectionViewModel @Inject constructor(
     }
 
     /**
+     * 选择题：选中某个选项（点击即答）
+     */
+    fun selectOption(index: Int, optionIndex: Int) {
+        _state.update { state ->
+            val newQuestions = state.questions.toMutableList()
+            if (index !in newQuestions.indices) return@update state
+            val item = newQuestions[index]
+            if (optionIndex !in item.options.indices) return@update state
+            newQuestions[index] = item.copy(selectedOptionIndex = optionIndex)
+            val updated = state.copy(questions = newQuestions, errorMessage = null)
+            // 重新计算选中时长：使用时长题每次改选都要同步
+            updated.copy(selectedDurationMinutes = resolveDurationMinutes(updated.questions))
+        }
+    }
+
+    /**
      * 提交回答
      *
      * 设计：用户必须回答所有问题，不允许跳过。
-     * 全部回答非空后保存到数据库并进入确认页。
+     * 全部回答后保存到数据库并进入确认页。
      * 通过 isSubmitting 状态防止双击重复保存。
      * @return true 表示提交成功可进入确认页，false 表示有未回答的问题或正在提交中
      */
@@ -135,7 +204,8 @@ class ReflectionViewModel @Inject constructor(
         // 正在提交中，阻止并发触发
         if (currentState.isSubmitting) return false
 
-        val allAnswered = currentState.questions.all { it.answer.isNotBlank() }
+        val allAnswered = currentState.questions.isNotEmpty() &&
+            currentState.questions.all { it.isAnswered }
 
         if (!allAnswered) {
             _state.update { it.copy(errorMessage = "请先回答所有反思问题") }
@@ -147,14 +217,17 @@ class ReflectionViewModel @Inject constructor(
         submitJob = viewModelScope.launch {
             try {
                 val now = System.currentTimeMillis()
-                val answers = currentState.questions.map { item ->
-                    ReflectionAnswerEntity(
-                        questionId = item.question.id,
-                        answerText = item.answer.trim(),
-                        targetApp = currentState.targetApp,
-                        answeredAt = now
-                    )
-                }
+                val answers = currentState.questions
+                    // 跳过兜底的时长题（id < 0），它没有对应的 DB 记录
+                    .filter { it.question.id > 0 }
+                    .map { item ->
+                        ReflectionAnswerEntity(
+                            questionId = item.question.id,
+                            answerText = item.answerText.trim(),
+                            targetApp = currentState.targetApp,
+                            answeredAt = now
+                        )
+                    }
                 reflectionRepository.saveAnswers(answers)
                 _state.update { it.copy(isSubmitted = true, isSubmitting = false) }
             } catch (e: CancellationException) {
@@ -172,5 +245,34 @@ class ReflectionViewModel @Inject constructor(
      */
     fun resetSubmitted() {
         _state.update { it.copy(isSubmitted = false, isSubmitting = false) }
+    }
+
+    /**
+     * 从题目列表中解析「使用时长」题的选中分钟数
+     * 找不到时长题或未选择时返回 0
+     */
+    private fun resolveDurationMinutes(items: List<ReflectionItemState>): Int {
+        val durationItem = items.firstOrNull {
+            it.question.questionType == ReflectionQuestionEntity.TYPE_DURATION
+        } ?: return 0
+        val option = durationItem.options.getOrNull(durationItem.selectedOptionIndex) ?: return 0
+        return ReflectionOptions.parseDurationMinutes(option)
+    }
+
+    companion object {
+        /**
+         * 内置的默认使用时长题
+         * 当用户删除全部反思问题或未配置时长题时作为兜底，保证时长选择功能始终可用
+         */
+        val DEFAULT_DURATION_QUESTION = ReflectionQuestionEntity(
+            id = -1,
+            questionText = "这次打算使用多久？",
+            order = Int.MAX_VALUE,
+            isActive = true,
+            isCustom = false,
+            placeholder = "",
+            questionType = ReflectionQuestionEntity.TYPE_DURATION,
+            optionsJson = """["5 分钟","15 分钟","30 分钟","1 小时"]"""
+        )
     }
 }

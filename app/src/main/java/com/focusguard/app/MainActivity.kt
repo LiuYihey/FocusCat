@@ -18,9 +18,11 @@ import com.focusguard.app.data.local.dao.CatCatalogDao
 import com.focusguard.app.data.local.dao.FoodCatalogDao
 import com.focusguard.app.data.local.dao.QuizQuestionDao
 import com.focusguard.app.data.local.dao.ReflectionQuestionDao
+import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
 import com.focusguard.app.data.repository.AppRepositoryImpl
 import com.focusguard.app.detection.AppDetectionManager
 import com.focusguard.app.service.FocusGuardService
+import com.focusguard.app.service.KeepAliveManager
 import com.focusguard.app.ui.MainScreen
 import com.focusguard.app.ui.theme.FocusGuardTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -171,9 +173,29 @@ class MainActivity : ComponentActivity() {
                     foodCatalogDao.updateDropRate(seed.foodId, seed.dropRate)
                 }
             }
-            // 反思问题
+            // 反思问题（需求 3：选择题）
+            // 老用户通过 MIGRATION_5_6 已把默认问题转成选择题，
+            // 但若用户此前删光了默认问题或改成了自定义题，需要补齐缺失的题型
+            val seeds = SeedData.getSeedReflectionQuestions()
             if (reflectionQuestionDao.countActive() == 0) {
-                reflectionQuestionDao.insertAll(SeedData.getSeedReflectionQuestions())
+                reflectionQuestionDao.insertAll(seeds)
+            } else {
+                // 缺少选择题 → 补一条；缺少使用时长题 → 补一条
+                val existing = reflectionQuestionDao.getAllQuestions()
+                val hasChoice = existing.any {
+                    it.isActive && it.questionType == ReflectionQuestionEntity.TYPE_CHOICE
+                }
+                val hasDuration = existing.any {
+                    it.isActive && it.questionType == ReflectionQuestionEntity.TYPE_DURATION
+                }
+                val maxOrder = existing.maxOfOrNull { it.order } ?: 0
+                val missing = buildList {
+                    if (!hasChoice) add(seeds[0].copy(order = maxOrder + 1))
+                    if (!hasDuration) add(seeds[1].copy(order = maxOrder + 2))
+                }
+                if (missing.isNotEmpty()) {
+                    reflectionQuestionDao.insertAll(missing)
+                }
             }
             // 好感度成就
             if (achievementDao.getAllAchievements().isEmpty()) {
@@ -212,6 +234,10 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             // Android 12+ 后台启动前台服务受限，忽略避免崩溃
         }
+        // 需求 1+4：进入 App 时确认保活任务已注册
+        // （JobScheduler 持久化任务在应用被系统清理后可能丢失，每次打开应用补一次保险）
+        KeepAliveManager.schedule(this)
+        KeepAliveManager.checkAccessibilityHealth(this)
     }
 
     /**

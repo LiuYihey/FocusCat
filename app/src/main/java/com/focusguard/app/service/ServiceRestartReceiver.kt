@@ -44,6 +44,12 @@ class ServiceRestartReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             // Android 12+ 极端后台场景可能受限，忽略避免崩溃
         }
+        // 需求 1+4：闹钟触发时顺带做一次无障碍健康自检
+        // 若系统开关被关闭则发通知引导用户重新开启；
+        // 若开关还在只是进程被杀，此刻进程已被系统重建，系统会自动重绑无障碍服务。
+        KeepAliveManager.checkAccessibilityHealth(context)
+        // 重排下一次守护闹钟（一次性闹钟 → 保持链式唤醒）
+        KeepAliveManager.schedule(context)
     }
 
     companion object {

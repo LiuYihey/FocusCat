@@ -52,7 +52,7 @@ import com.focusguard.app.data.local.entity.UserCatEntity
         ReflectionAnswerEntity::class,
         AffinityAchievementEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -268,6 +268,43 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
+         * v5 → v6 迁移：反思问题改为选择题（需求 3）
+         *
+         * 新增两列：
+         * - questionType：题目类型（open 开放问答 / choice 选择题 / duration 使用时长选择）
+         * - optionsJson：选项的 JSON 数组字符串
+         *
+         * 数据转换：把两条历史默认问题按其固定文案转成对应的选择题，
+         * 并把原本的第二题「你今天的 todo list 还有哪些？」改为使用时长选择。
+         * 用户自定义问题（isCustom=1）保持 open 形态，兼容原有开放问答 UI。
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE reflection_questions ADD COLUMN questionType TEXT NOT NULL DEFAULT 'open'"
+                )
+                database.execSQL(
+                    "ALTER TABLE reflection_questions ADD COLUMN optionsJson TEXT NOT NULL DEFAULT ''"
+                )
+                // 默认第 1 题 → 选择题
+                database.execSQL("""
+                    UPDATE reflection_questions
+                    SET questionType = 'choice',
+                        optionsJson = '["消遣一下","完成具体任务","只是想看看","其他"]'
+                    WHERE isCustom = 0 AND questionText = '你进入这个 app 是来做什么的？'
+                """.trimIndent())
+                // 默认第 2 题 → 使用时长选择
+                database.execSQL("""
+                    UPDATE reflection_questions
+                    SET questionType = 'duration',
+                        questionText = '这次打算使用多久？',
+                        optionsJson = '["5 分钟","15 分钟","30 分钟","1 小时"]'
+                    WHERE isCustom = 0 AND questionText = '你今天的 todo list 还有哪些？'
+                """.trimIndent())
+            }
+        }
+
+        /**
          * 获取数据库单例实例
          * @param context 上下文
          * @return 数据库实例
@@ -279,7 +316,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "focusguard.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(
+                        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6
+                    )
                     // 仅在数据库降级时销毁数据，升级时通过 Migration 保留用户数据
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build()

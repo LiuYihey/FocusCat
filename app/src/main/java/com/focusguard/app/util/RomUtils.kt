@@ -126,10 +126,12 @@ object RomUtils {
                 brandName = "OPPO / 一加 / realme（ColorOS）",
                 title = "ColorOS 保活设置",
                 steps = listOf(
-                    "「设置」→「电池」→「应用耗电管理」→ FocusCat 允许后台运行 + 允许自启动",
-                    "「手机管家」→「权限隐私」→「自启动管理」→ FocusCat 打开",
-                    "「设置」→「应用管理」→ FocusCat →「耗电管理」→ 允许后台运行",
-                    "近期任务列表里 FocusCat 卡片加锁"
+                    "「设置」→「电池」→「应用耗电管理」→ 找到 FocusCat → 选择「允许后台运行」",
+                    "同一页面 →「允许完全后台行为」打开（ColorOS 13+ 必须开，否则会被冻结）",
+                    "「手机管家」→「权限隐私」→「自启动管理」→ FocusCat 打开自启动开关",
+                    "「设置」→「应用管理」→ FocusCat →「电池」→ 选「不受限制」",
+                    "下拉控制中心里的「允许后台运行」→ 允许 FocusCat",
+                    "近期任务列表里 FocusCat 卡片下拉加锁（防止一键清理）"
                 )
             )
 

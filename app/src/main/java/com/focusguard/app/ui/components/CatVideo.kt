@@ -33,6 +33,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import kotlin.random.Random
 
 /**
  * 猫咪视频播放组件
@@ -52,6 +53,13 @@ import androidx.media3.ui.PlayerView
  * - 仅在真正异常时显示 fallback：播放错误 / 超长缓冲(>5s) / loop模式异常ENDED
  * - videoPath 变化时不标记不健康，靠 setKeepContentOnPlayerReset 保持上一帧
  *
+ * 随机起点设计（需求 2）：
+ * - randomStart=true 时，每次加载新 MediaItem 都会在视频中段随机取一个时间点开始播放，
+ *   每次进入页面 / 切换猫咪看到的内容都不同，带来新鲜感
+ * - 随机位置在视频时长的 15%~85% 区间内取，避免一开始或结尾的突兀感
+ * - 换猫时（contentKey 变化）会重新随机取点，且在新的首帧渲染前用新猫的静态图遮住
+ *   上一只猫的残留画面，保证不会显示错误的猫
+ *
  * @param videoPath assets 中的视频路径，如 "videos/idle/ragdoll.mp4"
  * @param modifier 布局修饰符
  * @param loop 是否循环播放（默认 true，用于持续动画效果）
@@ -62,6 +70,9 @@ import androidx.media3.ui.PlayerView
  * @param onCompletion 单次播放结束回调（仅 loop=false 时生效，用于视频序列切换）
  * @param fallbackBitmap 首次加载及播放器异常时显示的兜底图（猫咪 PNG = idle 视频首帧），
  *        首次加载时作为首帧占位，STATE_READY 后无缝切换到视频播放
+ * @param randomStart 是否从视频中段的随机时间点开始播放（需求 2）
+ * @param contentKey 内容标识（如猫咪品种 ID）。用于检测"换了一只猫"，
+ *        换猫时先遮住旧画面再播放新猫的视频，避免显示错误的猫
  */
 @Composable
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -72,12 +83,15 @@ fun CatVideo(
     videoResizeMode: Int = AspectRatioFrameLayout.RESIZE_MODE_FIT,
     edgeFade: Boolean = true,
     onCompletion: (() -> Unit)? = null,
-    fallbackBitmap: Bitmap? = null
+    fallbackBitmap: Bitmap? = null,
+    randomStart: Boolean = false,
+    contentKey: String? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentOnCompletion = rememberUpdatedState(onCompletion)
     val currentLoop = rememberUpdatedState(loop)
+    val currentContentKey = rememberUpdatedState(contentKey)
 
     // === 播放器健康状态 ===
     // true = 视频正在渲染，显示 PlayerView
@@ -87,6 +101,15 @@ fun CatVideo(
     var isVideoHealthy by remember { mutableStateOf(false) }
     // 进入 BUFFERING 的时间戳，用于检测超长时间缓冲
     var bufferingSince by remember { mutableStateOf<Long?>(null) }
+    // 已渲染首帧的内容标识，用于判断"当前画面属于哪只猫"
+    var renderedContentKey by remember { mutableStateOf<String?>(null) }
+    // 是否还需要执行一次随机起跳（在下一个 READY 时消费）
+    var pendingRandomSeek by remember { mutableStateOf(false) }
+
+    // 已消耗随机起跳的内容标识（需求 2）
+    // 同一只猫的同一段视频只随机一次：进入页面 / 换猫时随机，
+    // 待机动画自身循环切换（idle → 动作 → idle）不再跳位，避免动作中途突兀。
+    var randomConsumedKey by remember { mutableStateOf<String?>(null) }
 
     // ExoPlayer 只创建一次，与组件生命周期绑定。
     val exoPlayer = remember {
@@ -98,15 +121,25 @@ fun CatVideo(
     }
 
     // videoPath 变化时切换 MediaItem（player 不重建）
-    LaunchedEffect(videoPath) {
+    LaunchedEffect(videoPath, contentKey) {
         // 正常切换时不标记不健康：setKeepContentOnPlayerReset(true) 会保持上一帧画面，
         // 新视频 STATE_READY 后自动切换，无需首帧兜底介入，避免亮度突变
         bufferingSince = null
+        // 标记需要随机起跳：仅当当前内容尚未随机过（进入页面 / 换猫）时才跳
+        // videoPath 单独变化（待机动画序列切换）不重复跳位
+        pendingRandomSeek = randomStart && randomConsumedKey != contentKey
         val assetUri = "asset:///$videoPath"
         exoPlayer.setMediaItem(MediaItem.fromUri(assetUri))
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
     }
+
+    // 换猫检测（需求 2）：在组合阶段直接判定，避免"重组 → effect 执行"之间
+    // 闪现上一只猫的旧帧。renderedContentKey 只在新视频 READY 后才更新，
+    // 因此只要内容标识与已渲染内容不一致，就必须用静态图遮住画面。
+    val contentMismatch = contentKey != null && contentKey != renderedContentKey
+    // 显示兜底图的条件：播放器不健康、或当前渲染的内容不是本次要展示的内容
+    val shouldShowFallback = !isVideoHealthy || contentMismatch
 
     // loop 参数变化时更新 repeatMode
     LaunchedEffect(loop) {
@@ -122,6 +155,14 @@ fun CatVideo(
                         // 视频准备好，标记健康，清空缓冲计时
                         isVideoHealthy = true
                         bufferingSince = null
+                        renderedContentKey = currentContentKey.value
+                        // 随机起跳：READY 后才知道视频时长，此刻取随机位置并 seek
+                        if (pendingRandomSeek) {
+                            pendingRandomSeek = false
+                            seekToRandomPosition(exoPlayer)
+                            // 标记该内容已随机过：换猫时会再次随机
+                            randomConsumedKey = currentContentKey.value
+                        }
                     }
                     Player.STATE_BUFFERING -> {
                         // 缓冲是正常过程，不标记不健康，等视频自行恢复
@@ -225,16 +266,17 @@ fun CatVideo(
         )
 
         // === 兜底静态展示 ===
-        // 视频不健康（切换中/异常/长时间缓冲/首次加载）时，用外部传入的 fallbackBitmap（猫咪 PNG）
-        // 覆盖 PlayerView，确保画面永不消失，杜绝黑屏
-        if (!isVideoHealthy && fallbackBitmap != null) {
+        // 视频不健康（切换中/异常/长时间缓冲/首次加载）或换猫中（内容标识不匹配）时，
+        // 用外部传入的 fallbackBitmap（猫咪 PNG）覆盖 PlayerView，
+        // 确保画面永不消失、且绝不会显示上一只猫的错误画面
+        if (shouldShowFallback && fallbackBitmap != null) {
             Image(
                 bitmap = fallbackBitmap.asImageBitmap(),
                 contentDescription = null,
                 contentScale = contentScale,
                 modifier = Modifier.fillMaxSize()
             )
-        } else if (!isVideoHealthy && fallbackBitmap == null) {
+        } else if (shouldShowFallback && fallbackBitmap == null) {
             // 兜底图尚未加载完成（首次进入或切换中），用背景色填充避免透明黑屏
             Box(
                 modifier = Modifier
@@ -261,4 +303,24 @@ fun CatVideo(
             )
         }
     }
+}
+
+/**
+ * 从视频中段随机取一个时间点开始播放（需求 2）
+ *
+ * 取值区间为视频时长的 10%~70%：
+ * - 起点太靠前会与"从头播放"观感雷同，失去新鲜感
+ * - 终点太靠后会立刻播完结束，动画显得突兀
+ *
+ * 必须在 STATE_READY 之后调用，此时 ExoPlayer 才拿到准确的时长。
+ */
+private fun seekToRandomPosition(player: ExoPlayer) {
+    val duration = player.duration
+    // duration 未就绪（TIME_UNSET / 0）时不做处理，保持从头播放
+    if (duration <= 0L || duration == androidx.media3.common.C.TIME_UNSET) return
+    val min = (duration * 0.10f).toLong()
+    val max = (duration * 0.70f).toLong()
+    if (max <= min) return
+    val target = min + Random.nextLong(max - min)
+    player.seekTo(target)
 }

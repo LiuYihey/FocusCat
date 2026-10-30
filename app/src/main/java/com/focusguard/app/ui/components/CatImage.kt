@@ -125,7 +125,13 @@ fun CatCanvas(
             loop = false,
             edgeFade = edgeFade,
             onCompletion = currentOnCompletion,
-            fallbackBitmap = bitmap
+            fallbackBitmap = bitmap,
+            // 需求 2：待机主视频从中段随机时刻开始播放，每次进入都是新画面；
+            // 分支动作视频（踩奶/伸懒腰/蝴蝶）必须从头完整播放，不做随机
+            randomStart = currentVideoPath == idleVideoPath,
+            // 需求 2：换猫时用品种 ID 作为内容标识，
+            // 组件据此遮住上一只猫的残留画面，保证不会显示错误的猫
+            contentKey = breedId
         )
         return
     }

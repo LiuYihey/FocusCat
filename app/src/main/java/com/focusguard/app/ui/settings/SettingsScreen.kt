@@ -73,6 +73,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.focusguard.app.BuildConfig
+import com.focusguard.app.detection.AppDetectionManager
+import com.focusguard.app.util.PermissionHelper
+import com.focusguard.app.util.RomUtils
 import java.io.File
 
 /**
@@ -567,19 +570,23 @@ private fun RecurringReminderGroup(
 /**
  * 后台保活引导 — 可折叠卡片
  * 指导用户完成电池优化白名单、自启动、锁定后台等设置，确保守护服务稳定运行
+ *
+ * 需求 1+4 增强：
+ * - 步骤文案按 ROM 品牌动态生成（ColorOS 单独给出「允许完全后台行为」等关键项）
+ * - 提供一键跳转按钮，直接进入系统对应的保活设置页
+ * - 顶部展示无障碍守护的实时状态，系统把无障碍开关关掉时给出明确警示与恢复入口
  */
 @Composable
 private fun KeepAliveGuideCard() {
     var expanded by remember { mutableStateOf(false) }
     val hapticFeedback = LocalHapticFeedback.current
+    val context = LocalContext.current
     val accentColor = Color(0xFFF59E0B)
-    val guideSteps = listOf(
-        "电池优化白名单" to "在系统设置中将「专注猫」加入电池优化白名单，避免省电策略杀死后台服务。",
-        "允许自启动" to "部分厂商需要单独开启「自启动」权限，否则手机重启后守护不会自动恢复。",
-        "锁定后台任务" to "进入多任务界面，下拉或长按专注猫卡片，选择「锁定」，防止被一键清理。",
-        "关闭深度休眠" to "在设置 - 电池 - 应用耗电管理中，关闭「深度休眠」或「睡眠模式」。",
-        "保持通知开启" to "开启「守护通知」开关，利用前台服务通知提升系统保活优先级。"
-    )
+    val guide = remember { RomUtils.getKeepAliveGuide() }
+
+    // 无障碍守护实时状态：连接中 / 被系统关闭
+    val accessibilityConnected by AppDetectionManager.isAccessibilityConnected.collectAsStateWithLifecycle()
+    val accessibilityDisabled by AppDetectionManager.isAccessibilityDisabled.collectAsStateWithLifecycle()
 
     Surface(
         modifier = Modifier
@@ -618,7 +625,7 @@ private fun KeepAliveGuideCard() {
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "守护服务被杀？点这里查看设置方法",
+                            text = guide.brandName,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -629,6 +636,44 @@ private fun KeepAliveGuideCard() {
                     contentDescription = if (expanded) "收起" else "展开",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // 守护状态实时提示（需求 1+4）
+            if (accessibilityDisabled) {
+                Spacer(modifier = Modifier.size(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = accentColor.copy(alpha = 0.12f)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { PermissionHelper.requestAccessibilityPermission(context) }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Info,
+                            contentDescription = null,
+                            tint = accentColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "无障碍服务已被系统关闭，点击这里重新开启守护",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            } else if (!accessibilityConnected) {
+                Spacer(modifier = Modifier.size(12.dp))
+                Text(
+                    text = "无障碍服务正在恢复中（系统会在数秒内自动重连）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -644,7 +689,33 @@ private fun KeepAliveGuideCard() {
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
                     )
                     Spacer(modifier = Modifier.size(12.dp))
-                    guideSteps.forEachIndexed { index, (title, desc) ->
+
+                    // 一键跳转：直接进入系统保活设置页
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        KeepAliveActionButton(
+                            text = "电池白名单",
+                            modifier = Modifier.weight(1f),
+                            onClick = { PermissionHelper.requestBatteryOptimization(context) }
+                        )
+                        KeepAliveActionButton(
+                            text = "允许后台运行",
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                if (RomUtils.detectBrand() == RomUtils.RomBrand.COLOROS) {
+                                    PermissionHelper.requestColorOsBackgroundRun(context)
+                                } else {
+                                    PermissionHelper.requestAutoStart(context)
+                                }
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.size(16.dp))
+
+                    guide.steps.forEachIndexed { index, step ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -666,25 +737,52 @@ private fun KeepAliveGuideCard() {
                                 }
                             }
                             Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.size(2.dp))
-                                Text(
-                                    text = desc,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 18.sp
-                                )
-                            }
+                            Text(
+                                text = step,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                lineHeight = 18.sp
+                            )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 保活引导里的快捷跳转按钮（暖琥珀色描边，16dp 圆角）
+ */
+@Composable
+private fun KeepAliveActionButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val hapticFeedback = LocalHapticFeedback.current
+    val accentColor = Color(0xFFF59E0B)
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            },
+        shape = RoundedCornerShape(16.dp),
+        color = accentColor.copy(alpha = 0.10f),
+        shadowElevation = 0.dp
+    ) {
+        Box(
+            modifier = Modifier.padding(vertical = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = accentColor
+            )
         }
     }
 }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
 import com.focusguard.app.data.repository.ReflectionRepository
+import com.focusguard.app.util.ReflectionOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +32,8 @@ data class ReflectionQuestionsUiState(
 /**
  * 反思问题管理 ViewModel
  * 允许用户查看、添加、编辑、启用/禁用、删除反思问题
+ *
+ * 需求 3：支持自定义题目类型（开放问答 / 选择题 / 使用时长）与选项列表
  */
 @HiltViewModel
 class ReflectionQuestionsViewModel @Inject constructor(
@@ -75,12 +78,26 @@ class ReflectionQuestionsViewModel @Inject constructor(
     /**
      * 保存问题（新增或更新）
      * @param questionText 问题文本
-     * @param placeholder 输入框占位提示
+     * @param placeholder 输入框占位提示（仅开放问答使用）
+     * @param questionType 题目类型（open / choice / duration）
+     * @param options 选项列表（选择题与使用时长题使用）
      */
-    fun saveQuestion(questionText: String, placeholder: String) {
+    fun saveQuestion(
+        questionText: String,
+        placeholder: String,
+        questionType: String,
+        options: List<String>
+    ) {
         val editing = _state.value.editingQuestion
         if (questionText.isBlank()) {
             _state.update { it.copy(errorMessage = "问题不能为空") }
+            return
+        }
+
+        val cleanOptions = options.map { it.trim() }.filter { it.isNotBlank() }
+        // 选择题至少要有两个选项，否则用户无从选择
+        if (questionType != ReflectionQuestionEntity.TYPE_OPEN && cleanOptions.size < 2) {
+            _state.update { it.copy(errorMessage = "选择题至少需要 2 个选项") }
             return
         }
 
@@ -91,7 +108,9 @@ class ReflectionQuestionsViewModel @Inject constructor(
                     reflectionRepository.updateQuestion(
                         editing.copy(
                             questionText = questionText.trim(),
-                            placeholder = placeholder.trim()
+                            placeholder = placeholder.trim(),
+                            questionType = questionType,
+                            optionsJson = ReflectionOptions.encode(cleanOptions)
                         )
                     )
                 } else {
@@ -103,7 +122,9 @@ class ReflectionQuestionsViewModel @Inject constructor(
                             order = maxOrder + 1,
                             isActive = true,
                             isCustom = true,
-                            placeholder = placeholder.trim()
+                            placeholder = placeholder.trim(),
+                            questionType = questionType,
+                            optionsJson = ReflectionOptions.encode(cleanOptions)
                         )
                     )
                 }

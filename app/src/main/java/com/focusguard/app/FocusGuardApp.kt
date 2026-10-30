@@ -36,6 +36,7 @@ class FocusGuardApp : Application() {
         )
         AppDetectionManager.setAppRepository(entryPoint.appRepository())
         createNotificationChannel()
+        createAlertNotificationChannel()
     }
 
     /**
@@ -58,8 +59,32 @@ class FocusGuardApp : Application() {
         notificationManager.createNotificationChannel(channel)
     }
 
+    /**
+     * 创建「守护异常提醒」通知渠道（需求 1/4）
+     *
+     * 与保活通知渠道分开：保活通知是常驻静音的（IMPORTANCE_LOW），
+     * 而「无障碍被系统关闭」是需要用户立刻看到并处理的告警，
+     * 因此使用 IMPORTANCE_DEFAULT 让它能正常弹出横幅。
+     */
+    private fun createAlertNotificationChannel() {
+        val channel = NotificationChannel(
+            NOTIFICATION_CHANNEL_ALERT,
+            "守护提醒",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "无障碍服务被系统关闭等守护异常时的提醒"
+            setShowBadge(true)
+        }
+        val notificationManager =
+            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+
     companion object {
         /** 通知渠道 ID */
         const val NOTIFICATION_CHANNEL_ID = "focus_guard_service"
+
+        /** 守护异常提醒通知渠道 ID */
+        const val NOTIFICATION_CHANNEL_ALERT = "focus_guard_alert"
     }
 }
