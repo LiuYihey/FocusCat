@@ -69,6 +69,7 @@ import com.focusguard.app.MainActivity
 import com.focusguard.app.ui.components.CatVideo
 import com.focusguard.app.ui.components.GlassDialog
 import com.focusguard.app.ui.components.GlassDialogActions
+import com.focusguard.app.ui.components.RunningCatProgress
 import com.focusguard.app.ui.theme.TimerTextStyle
 
 /**
@@ -292,27 +293,14 @@ private fun FocusTimer(
                 textAlign = TextAlign.Center
             )
 
-            // 细进度条：替代原先的圆环，指示距离下一份猫粮的进度
-            Spacer(modifier = Modifier.height(14.dp))
-            Box(
+            // 小猫奔跑进度：猫沿轨道朝猫粮碗跑，位置 = 奖励进度
+            Spacer(modifier = Modifier.height(12.dp))
+            RunningCatProgress(
+                progress = animatedProgress.coerceIn(0f, 1f),
                 modifier = Modifier
-                    .width(132.dp)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.White.copy(alpha = 0.22f))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(animatedProgress.coerceIn(0f, 1f))
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(50))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(Color(0xFFFF9F43), Color(0xFFFFD08A))
-                            )
-                        )
-                )
-            }
+                    .fillMaxWidth()
+                    .height(64.dp)
+            )
         }
     }
 }

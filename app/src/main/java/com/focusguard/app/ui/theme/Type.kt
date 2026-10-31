@@ -186,8 +186,8 @@ val DarkTypography = Typography(
 val TimerTextStyle = TextStyle(
     fontFamily = TimerNumberFont,
     fontWeight = FontWeight.Bold,
-    fontSize = 56.sp,
-    lineHeight = 62.sp,
+    fontSize = 76.sp,
+    lineHeight = 84.sp,
     letterSpacing = 1.sp,
     fontFeatureSettings = "tnum"
 )
