@@ -15,6 +15,7 @@ import com.focusguard.app.R
 import com.focusguard.app.ReflectionActivity
 import com.focusguard.app.data.local.AppDatabase
 import com.focusguard.app.detection.AppDetectionManager
+import com.focusguard.app.detection.QuizTrigger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -220,10 +221,10 @@ class FocusGuardService : android.app.Service() {
                     // 由前台服务统一启动 Activity，避免 BAL 限制
                     val pending = AppDetectionManager.consumePendingTrigger()
                     if (pending != null) {
-                        val (pkg, isRecurring) = pending
+                        val (pkg, trigger) = pending
                         if (AppDetectionManager.shouldBlock(pkg) && !AppDetectionManager.isQuizShowing()) {
                             AppDetectionManager.onQuizShown(pkg)
-                            launchReflectionActivity(pkg, isRecurring)
+                            launchReflectionActivity(pkg, trigger)
                         }
                     }
 
@@ -261,14 +262,28 @@ class FocusGuardService : android.app.Service() {
                                 nonBlockedForegroundCount = 0
                             }
 
-                            // 首次打开 / 切回：事件式触发
-                            if (AppDetectionManager.checkAndTrigger(fg)) {
-                                AppDetectionManager.onQuizShown(fg)
-                                launchReflectionActivity(fg, isRecurring = false)
-                            } else if (AppDetectionManager.checkRecurringTrigger(fg)) {
-                                // 持续使用再次提醒：recurring 触发
-                                AppDetectionManager.onQuizShown(fg)
-                                launchReflectionActivity(fg, isRecurring = true)
+                            // 优先级 2.5：结算到期的豁免窗口
+                            // 用户选定的使用时长已到 → 该应用重新被拦截；
+                            // 若此刻用户仍停留在该应用内，登记「时长到期」提醒。
+                            // 必须在这里做：只有轮询引擎掌握权威的前台应用信息，
+                            // 无障碍事件无法判断用户是否仍停留在应用内。
+                            val expiredReminderPkgs = AppDetectionManager.settleExpiredExemptions(fg)
+
+                            if (expiredReminderPkgs.isNotEmpty()) {
+                                // 到期提醒直接针对该包名弹窗，不依赖轮询观测到的 fg：
+                                // UsageStats 的前台信息存在刷新延迟，
+                                // fg 此刻可能仍指向用户早已离开的应用，导致提醒丢失。
+                                val target = expiredReminderPkgs.first()
+                                AppDetectionManager.onQuizShown(target)
+                                launchReflectionActivity(target, QuizTrigger.EXPIRY)
+                            } else {
+                                // 首次打开 / 切回：事件式触发
+                                val trigger = AppDetectionManager.checkAndTrigger(fg)
+                                    ?: AppDetectionManager.checkRecurringTrigger(fg)
+                                if (trigger != null) {
+                                    AppDetectionManager.onQuizShown(fg)
+                                    launchReflectionActivity(fg, trigger)
+                                }
                             }
                         }
                     }
@@ -338,10 +353,13 @@ class FocusGuardService : android.app.Service() {
      *
      * 三级策略检测，兼顾精确性、性能和可靠性：
      *
-     * 策略 1（轻量）：queryEvents 查询最近 QUERY_WINDOW_MS(5s) 内的 ACTIVITY_RESUMED 事件
-     *   —— 精确检测应用切换，5s 窗口小、IPC 开销低
+     * 策略 1（轻量）：queryEvents 查询最近 QUERY_WINDOW_MS 内的 ACTIVITY_RESUMED 事件
+     *   —— 精确检测应用切换，IPC 开销低
+     *   —— 窗口必须显著大于 UsageStats 的事件入库延迟：
+     *     事件是批量延迟入库的，若窗口太短，延迟入库的切换事件会被永久错过，
+     *     缓存就会一直停在旧包名（曾导致「使用时长到期」不弹提醒）
      *
-     * 策略 2（缓存）：当 queryEvents 返回空（用户停留同一应用 >5s 无新事件）时，
+     * 策略 2（缓存）：当 queryEvents 返回空（用户停留同一应用无新事件）时，
      *   优先使用 lastKnownForeground 缓存（2h 内有效）
      *   —— 避免每 1.5s 调用昂贵的 queryUsageStats(2h)，这是性能优化的关键
      *   —— 用户没切换应用 = 仍在缓存的应用里，用缓存值驱动检测是正确的
@@ -358,7 +376,7 @@ class FocusGuardService : android.app.Service() {
         val usm = getSystemService(USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
         val now = System.currentTimeMillis()
 
-        // 策略 1：queryEvents 查询事件流（轻量，5s 窗口）
+        // 策略 1：queryEvents 查询事件流（轻量）
         val events = try {
             usm.queryEvents(now - QUERY_WINDOW_MS, now)
         } catch (e: Exception) {
@@ -424,22 +442,22 @@ class FocusGuardService : android.app.Service() {
      * 启动反思拦截页面
      * 前台服务拥有 BAL 权限，可直接 startActivity
      * @param targetPackage 触发的应用包名
-     * @param isRecurring true=持续使用再次提醒（差异化文案），false=首次拦截
+     * @param trigger 触发类型（首次拦截 / 持续使用再次提醒 / 使用时长到期）
      *
      * recurring 场景下 elapsedMin 取真实累计使用时长（修复 P0-2），
      * 让用户看到自己真实的使用时长，而非设置间隔值。
      */
-    private fun launchReflectionActivity(targetPackage: String, isRecurring: Boolean) {
+    private fun launchReflectionActivity(targetPackage: String, trigger: QuizTrigger) {
         try {
-            val elapsedMin = if (isRecurring) {
+            val elapsedMin = if (trigger == QuizTrigger.RECURRING) {
                 AppDetectionManager.getAppEnterElapsedMin(targetPackage)
             } else 0
             val intent = Intent(this, ReflectionActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 putExtra(ReflectionActivity.EXTRA_TARGET_PACKAGE, targetPackage)
-                putExtra(ReflectionActivity.EXTRA_IS_RECURRING, isRecurring)
-                if (isRecurring) {
+                putExtra(ReflectionActivity.EXTRA_TRIGGER, trigger.name)
+                if (trigger == QuizTrigger.RECURRING) {
                     putExtra(ReflectionActivity.EXTRA_ELAPSED_MIN, elapsedMin)
                 }
             }
@@ -480,8 +498,15 @@ class FocusGuardService : android.app.Service() {
         const val NOTIFICATION_ID = 1001
         /** 轮询间隔（毫秒）- 1.5 秒，兼顾响应速度与电量 */
         private const val POLL_INTERVAL_MS = 1500L
-        /** queryEvents 查询时间窗口（毫秒）- 查询最近 5 秒事件，精确检测应用切换 */
-        private const val QUERY_WINDOW_MS = 5_000L
+        /** queryEvents 查询时间窗口（毫秒）- 查询最近 60 秒事件
+         *
+         * 修复：原 5s 窗口会永久错过「延迟入库」的切换事件。
+         * UsageStats 事件是批量异步入库的，入库延迟可达数十秒；
+         * 一旦错过窗口，该切换事件就再也读不到，
+         * 前台包名缓存会一直停在旧值（曾导致「使用时长到期」既不弹提醒也不恢复拦截）。
+         * 60s 窗口可覆盖常见入库延迟，且 IPC 开销与 5s 基本相同。
+         */
+        private const val QUERY_WINDOW_MS = 60_000L
         /** queryUsageStats 兜底查询窗口（毫秒）- 2 小时，覆盖最大 recurring 间隔 120 分钟
          *  修复盲区：原 60s 窗口在用户停留同一应用 >60s 后失效，导致 recurring 永不触发 */
         private const val STATS_WINDOW_MS = 2 * 60 * 60 * 1000L

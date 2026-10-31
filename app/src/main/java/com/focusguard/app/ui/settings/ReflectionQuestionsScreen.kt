@@ -62,6 +62,7 @@ import com.focusguard.app.ui.components.CollapsibleSection
 import com.focusguard.app.ui.components.GlassDialog
 import com.focusguard.app.ui.components.GlassDialogActions
 import com.focusguard.app.ui.components.SoftTextField
+import com.focusguard.app.util.ReflectionOptions
 
 /**
  * 反思问题管理界面
@@ -217,6 +218,23 @@ private fun QuestionCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // 时长题：展示 App 实际识别出的分钟数，
+                    // 用户一眼就能确认自己写的时长被正确理解
+                    if (question.questionType == ReflectionQuestionEntity.TYPE_DURATION) {
+                        val parsed = question.options.mapNotNull {
+                            ReflectionOptions.parseDurationMinutes(it)
+                                .takeIf { m -> m > 0 }
+                            ?.let { ReflectionOptions.formatDuration(it) }
+                        }
+                        if (parsed.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "实际时长：${parsed.joinToString(" / ")}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                 }
                 if (question.isCustom) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -342,7 +360,7 @@ private fun EditQuestionDialog(
                 Column {
                     Text(
                         text = if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
-                            "时长选项（数字为分钟数，如 15 或 1 小时）"
+                            "时长选项（写数字即分钟数，如 15、15 分钟、1 小时）"
                         } else {
                             "选项（至少 2 个）"
                         },
@@ -355,22 +373,43 @@ private fun EditQuestionDialog(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SoftTextField(
-                                value = option,
-                                onValueChange = { newValue ->
-                                    options = options.toMutableList().also {
-                                        it[index] = newValue
-                                    }
-                                },
-                                label = "选项 ${index + 1}",
-                                placeholder = if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
-                                    "如 15 分钟"
-                                } else {
-                                    "选项文案"
-                                },
-                                modifier = Modifier.weight(1f),
-                                singleLine = true
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                SoftTextField(
+                                    value = option,
+                                    onValueChange = { newValue ->
+                                        options = options.toMutableList().also {
+                                            it[index] = newValue
+                                        }
+                                    },
+                                    label = "选项 ${index + 1}",
+                                    placeholder = if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
+                                        "如 15 分钟"
+                                    } else {
+                                        "选项文案"
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
+                                )
+                                // 时长选项：实时显示 App 识别出的分钟数，
+                                // 让用户确认自己写的写法能被正确理解
+                                if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
+                                    val parsedMin = ReflectionOptions.parseDurationMinutes(option)
+                                    Text(
+                                        text = if (parsedMin > 0) {
+                                            "识别为 ${ReflectionOptions.formatDuration(parsedMin)}"
+                                        } else {
+                                            "无法识别时长，请写成「15 分钟」这样的格式"
+                                        },
+                                        color = if (parsedMin > 0) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                                    )
+                                }
+                            }
                             IconButton(
                                 onClick = {
                                     options = options.toMutableList().also {

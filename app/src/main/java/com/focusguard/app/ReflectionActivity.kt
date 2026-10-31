@@ -75,6 +75,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.focusguard.app.detection.AppDetectionManager
+import com.focusguard.app.detection.QuizTrigger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.focusguard.app.ui.reflection.ReflectionUiState
@@ -112,8 +113,15 @@ class ReflectionActivity : ComponentActivity() {
     // 修改时自动触发重组；在非 Composable 中（如 onNewIntent）赋值也安全。
     private var currentTargetPackage: String by mutableStateOf("")
     private var displayAppName: String by mutableStateOf("")
-    private var isRecurring: Boolean by mutableStateOf(false)
+    private var trigger: QuizTrigger by mutableStateOf(QuizTrigger.FIRST)
     private var elapsedMin: Int by mutableStateOf(0)
+
+    /** 「使用时长到期」场景下用户当初选的分钟数，用于文案展示 */
+    private var expiryMin: Int by mutableStateOf(0)
+
+    /** 是否为「再次提醒」类触发（recurring / 使用时长到期） */
+    private val isRecurring: Boolean
+        get() = trigger != QuizTrigger.FIRST
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -136,8 +144,9 @@ class ReflectionActivity : ComponentActivity() {
         // 初始化成员状态（onCreate 首次进入）
         currentTargetPackage = targetPackage
         displayAppName = getAppName(targetPackage)
-        isRecurring = intent.getBooleanExtra(EXTRA_IS_RECURRING, false)
+        trigger = QuizTrigger.fromName(intent.getStringExtra(EXTRA_TRIGGER))
         elapsedMin = intent.getIntExtra(EXTRA_ELAPSED_MIN, 0)
+        expiryMin = resolveExpiryMin(targetPackage)
 
         // 标记拦截页已显示
         AppDetectionManager.onQuizShown(targetPackage)
@@ -236,8 +245,9 @@ class ReflectionActivity : ComponentActivity() {
                             ReflectionContent(
                                 state = state,
                                 displayAppName = displayAppName,
-                                isRecurring = isRecurring,
+                                trigger = trigger,
                                 elapsedMin = elapsedMin,
+                                expiryMin = expiryMin,
                                 onAnswerChange = { index, answer ->
                                     viewModel.updateAnswer(index, answer)
                                 },
@@ -265,9 +275,21 @@ class ReflectionActivity : ComponentActivity() {
             // 同步更新全部状态，确保跳转 ConfirmActivity 时传递正确包名、UI 显示正确应用名
             currentTargetPackage = targetPackage
             displayAppName = getAppName(targetPackage)
-            isRecurring = intent.getBooleanExtra(EXTRA_IS_RECURRING, false)
+            trigger = QuizTrigger.fromName(intent.getStringExtra(EXTRA_TRIGGER))
             elapsedMin = intent.getIntExtra(EXTRA_ELAPSED_MIN, 0)
+            expiryMin = resolveExpiryMin(targetPackage)
         }
+    }
+
+    /**
+     * 解析「使用时长到期」场景下用户当初选的分钟数
+     *
+     * 只读不消费：onNewIntent 重入（用户切到别的应用又切回来）时
+     * 仍要显示同一个时长。事件在用户做出选择或弹窗关闭时清除。
+     */
+    private fun resolveExpiryMin(pkg: String): Int {
+        if (trigger != QuizTrigger.EXPIRY) return 0
+        return AppDetectionManager.peekPendingExpiryReminder(pkg)?.durationMinutes ?: 0
     }
 
     override fun onResume() {
@@ -306,8 +328,11 @@ class ReflectionActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_TARGET_PACKAGE = "extra_target_package"
-        /** 是否为「持续使用再次提醒」（recurring）。默认 false=首次拦截 */
-        const val EXTRA_IS_RECURRING = "extra_is_recurring"
+        /**
+         * 触发类型（QuizTrigger.name）：
+         * FIRST=首次拦截 / RECURRING=持续使用再次提醒 / EXPIRY=使用时长到期
+         */
+        const val EXTRA_TRIGGER = "extra_trigger"
         /** recurring 场景下已使用的分钟数，用于文案展示 */
         const val EXTRA_ELAPSED_MIN = "extra_elapsed_min"
         /** 用户在「使用时长」题中选择的分钟数，透传给确认页写入临时豁免窗口 */
@@ -402,12 +427,15 @@ private fun EmptyQuestionsContent(
 private fun ReflectionContent(
     state: ReflectionUiState,
     displayAppName: String,
-    isRecurring: Boolean,
+    trigger: QuizTrigger,
     elapsedMin: Int,
+    expiryMin: Int,
     onAnswerChange: (Int, String) -> Unit,
     onOptionSelect: (Int, Int) -> Unit,
     onSubmit: () -> Unit
 ) {
+    val isRecurring = trigger != QuizTrigger.FIRST
+    val isExpiry = trigger == QuizTrigger.EXPIRY
     // 当前展示到第几个问题（逐步揭示）
     // 使用 state.targetApp 作为 key：onNewIntent 加载新问题时 currentStep 自动重置为 0
     // 避免新 quiz 沿用旧 quiz 的步骤（如旧 quiz 第3题 → 新 quiz 只有2题导致越界）
@@ -450,7 +478,7 @@ private fun ReflectionContent(
         // 修复 P1-2：原仅靠标题文字区分，缺乏瞬间识别
         if (isRecurring) {
             Text(
-                text = "再次提醒",
+                text = if (isExpiry) "时间到了" else "再次提醒",
                 color = accentColor.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
@@ -470,16 +498,21 @@ private fun ReflectionContent(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = if (isRecurring) "已经用了一阵子" else "专注时刻",
+            text = when {
+                isExpiry -> "时间到了"
+                isRecurring -> "已经用了一阵子"
+                else -> "专注时刻"
+            },
             color = textColor,
             fontSize = 30.sp,
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = if (isRecurring) {
-                "继续之前，再花一分钟确认下当下的状态"
-            } else {
-                "想清楚再进入，也是一种温柔"
+            text = when {
+                isExpiry && expiryMin > 0 -> "说好只用 $expiryMin 分钟，先停一下？"
+                isExpiry -> "说好只用这么久，先停一下？"
+                isRecurring -> "继续之前，再花一分钟确认下当下的状态"
+                else -> "想清楚再进入，也是一种温柔"
             },
             color = dimColor,
             fontSize = 15.sp,

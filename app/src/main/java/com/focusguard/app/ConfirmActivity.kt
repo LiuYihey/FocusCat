@@ -312,6 +312,9 @@ class ConfirmActivity : ComponentActivity() {
                                         // 需求 3：传入用户选中的使用时长，
                                         // 该时长内再次进入此应用不再弹窗，到期后自动恢复拦截提醒
                                         AppDetectionManager.onAppEntered(targetPackage, selectedDurationMin)
+                                        // 「时长到期」提醒已送达（用户在本次弹窗做出了新选择），
+                                        // 清除该事件，避免它被用于后续的弹窗
+                                        AppDetectionManager.consumePendingExpiryReminder(targetPackage)
                                         // 仅 finish() 即可：拦截页（ReflectionActivity → ConfirmActivity）
                                         // 以 NEW_TASK 启动于独立 task，用户原本打开的目标应用仍留在背后的 task。
                                         // ConfirmActivity finish 后系统自动将该 task 拉回前台，目标应用自然显现。

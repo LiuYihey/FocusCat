@@ -35,6 +35,9 @@ object AppDetectionManager {
     /** 临时豁免窗口的存储 Key 前缀（需求 3），完整键 = 前缀 + 包名 */
     private const val KEY_EXEMPTION_PREFIX = "exempt_until_"
 
+    /** 临时豁免「时长（分钟）」的存储 Key 前缀，完整键 = 前缀 + 包名 */
+    private const val KEY_EXEMPTION_DURATION_PREFIX = "exempt_dur_"
+
     /** 无障碍服务被系统关闭的标记（需求 1/4），跨进程存活 */
     private const val KEY_ACCESSIBILITY_DISABLED = "accessibility_disabled"
 
@@ -144,6 +147,40 @@ object AppDetectionManager {
      */
     private val temporaryExemptUntil: MutableMap<String, Long> = mutableMapOf()
 
+    /**
+     * 临时豁免窗口对应的「时长（分钟）」
+     *
+     * Key = 被约束应用包名，Value = 用户当时选中的分钟数。
+     * 用于到期提醒时告诉用户「你当时说的是 N 分钟」，也让恢复流程能读回真实时长。
+     */
+    private val temporaryExemptDuration: MutableMap<String, Int> = mutableMapOf()
+
+    /**
+     * 待提醒的「时长到期」事件
+     *
+     * Key = 包名，Value = [ExpiryReminder]。
+     *
+     * 只有「用户仍在该应用内、直到豁免到期」时才会写入，
+     * 这样到期提醒只会在用户确实还在里面时弹出；
+     * 用户提前退出（clearAppEnterSession）则不会留下到期事件。
+     */
+    private val pendingExpiryReminder: MutableMap<String, ExpiryReminder> = mutableMapOf()
+
+    /**
+     * 用户当前停留的应用（无障碍窗口事件驱动，即时信号）
+     *
+     * 为什么不用轮询引擎的 UsageStats 前台包名：
+     * UsageStats 的前台信息是批量延迟入库的，
+     * 而轮询只回看 5 秒窗口 —— 切换事件若延迟入库超过 5 秒就永远不会被看到，
+     * 缓存会一直停在旧包名（最长 2 小时）。
+     * 若到期时只信这个包名，就会误判「用户已离开」→ 既不弹提醒也不恢复拦截。
+     *
+     * 无障碍服务的窗口事件是实时的，且本 App 的拦截链路本就依赖它，
+     * 因此用它作为权威信号；轮询包名只作为降级兜底。
+     */
+    @Volatile
+    private var foregroundAppPkg: String? = null
+
     /** 再次提醒间隔（分钟），0=关闭。默认 30，由设置页写入 */
     @Volatile
     var recurringIntervalMin: Int = DEFAULT_RECURRING_INTERVAL_MIN
@@ -155,21 +192,21 @@ object AppDetectionManager {
     /**
      * 挂起的拦截请求（无障碍服务检测到后放入，由前台服务统一启动 Activity）
      * 解决 BAL（后台 Activity 启动）限制：前台服务拥有豁免权，可可靠启动 Activity
-     * 格式：Pair(包名, 是否recurring)
+     * 格式：Pair(包名, 触发类型)
      *
      * 修复 ADM-1：@Volatile 只保证可见性不保证读-写原子性。
      * consumePendingTrigger 的"读后置 null"与 postPendingTrigger 的"写"存在竞态：
      * consume 读到旧值 → post 写新值 → consume 置 null 覆盖新值 → 新触发丢失。
      * 用 synchronized 保护读写复合操作。
      */
-    private var pendingTrigger: Pair<String, Boolean>? = null
+    private var pendingTrigger: Pair<String, QuizTrigger>? = null
 
     /**
      * 获取并清除挂起的拦截请求
      * 由前台服务轮询时调用，返回后自动清空
-     * @return 挂起的拦截 (pkg, isRecurring)，无则返回 null
+     * @return 挂起的拦截 (pkg, trigger)，无则返回 null
      */
-    fun consumePendingTrigger(): Pair<String, Boolean>? {
+    fun consumePendingTrigger(): Pair<String, QuizTrigger>? {
         synchronized(this) {
             val result = pendingTrigger
             pendingTrigger = null
@@ -181,11 +218,11 @@ object AppDetectionManager {
      * 提交一个挂起的拦截请求
      * 由无障碍服务调用，避免 BAL 限制导致无法启动 Activity
      * @param pkg 目标包名
-     * @param isRecurring 是否为 recurring 提醒
+     * @param trigger 触发类型（首次拦截 / 再次提醒 / 时长到期）
      */
-    fun postPendingTrigger(pkg: String, isRecurring: Boolean) {
+    fun postPendingTrigger(pkg: String, trigger: QuizTrigger) {
         synchronized(this) {
-            pendingTrigger = Pair(pkg, isRecurring)
+            pendingTrigger = Pair(pkg, trigger)
         }
     }
 
@@ -265,25 +302,107 @@ object AppDetectionManager {
     }
 
     /**
-     * 是否处于临时豁免窗口内
-     * 窗口到期时自动移除并触发一次提醒（恢复拦截）
+     * 是否处于临时豁免窗口内（纯查询，无副作用）
      *
-     * 到期时清空 lastAppEnterPkg / lastTriggeredPkg：
-     * 清空 lastAppEnterPkg 是为了让 checkAndTrigger 的「pkg == lastAppEnterPkg」分支
-     * 不再命中，从而在下一轮轮询（1.5s 内）立即弹出提醒；
-     * 否则用户停留在该应用里会一直等不到 recurring 提醒。
+     * 到期的清理交给 [settleExpiredExemption]，
+     * 保证「到期」这一状态只被结算一次，不会被多个调用方重复消费。
      */
     private fun isInExemptionWindow(packageName: String): Boolean {
         val until = temporaryExemptUntil[packageName] ?: return false
-        if (System.currentTimeMillis() < until) return true
-        // 已到期：移除豁免并恢复拦截（下次 checkAndTrigger 即可弹窗提醒）
-        temporaryExemptUntil.remove(packageName)
-        prefs?.edit()?.remove(exemptionKey(packageName))?.apply()
-        lastAppEnterPkg = null
-        lastAppEnterTimeMs = 0L
-        lastTriggeredPkg = null
-        lastTriggerTime = 0L
-        return false
+        return System.currentTimeMillis() < until
+    }
+
+    /**
+     * 结算已到期的豁免窗口（由轮询引擎调用）
+     *
+     * 到期即移除豁免（恢复拦截），让该应用重新进入被拦截状态。
+     *
+     * 只有「用户此刻仍停留在该应用内」，
+     * 才判定为「时长到期」事件并登记到 pendingExpiryReminder；
+     * 用户提前退出（前台已切走）则不产生到期提醒 ——
+     * 自然也就没提醒，下次再打开该应用按首次拦截处理。
+     *
+     * 「是否还在应用内」由 [isUserInside] 判定：
+     * 优先用无障碍窗口事件记录的即时信号（零延迟、能捕捉退出后重进），
+     * 缺失时才回退到轮询引擎观测到的前台包名。
+     *
+     * 结算结果是幂等的：豁免一旦移除就不会重复到期，
+     * 保证「到期」这一状态只被结算一次。
+     *
+     * 必须由轮询引擎调用（而非 checkAndTrigger）：
+     * 只有轮询引擎掌握「此刻是否已到点」这个权威信息。
+     *
+     * @param foregroundPkg 轮询引擎观测到的前台包名（降级兜底用）
+     * @return 需要弹出「时间到了」提醒的包名列表（可能为空）
+     */
+    fun settleExpiredExemptions(foregroundPkg: String?): List<String> {
+        synchronized(this) {
+            val now = System.currentTimeMillis()
+            val expired = temporaryExemptUntil.filterValues { it <= now }.keys.toList()
+            if (expired.isEmpty()) return emptyList()
+
+            val needReminder = mutableListOf<String>()
+            for (pkg in expired) {
+                val until = temporaryExemptUntil[pkg] ?: continue
+                // 已到期：移除豁免并恢复拦截
+                temporaryExemptUntil.remove(pkg)
+                val durationMin = temporaryExemptDuration.remove(pkg) ?: 0
+                prefs?.edit()
+                    ?.remove(exemptionKey(pkg))
+                    ?.remove(exemptionDurationKey(pkg))?.apply()
+
+                // 「用户此刻是否仍在该应用内」：
+                // 优先用无障碍窗口事件记录的即时信号（无延迟），
+                // 缺失时才回退到轮询引擎观测到的前台包名。
+                if (isUserInside(pkg, foregroundPkg)) {
+                    // 用户仍在该应用内 → 登记「时长到期」事件，供弹窗显示差异化文案
+                    pendingExpiryReminder[pkg] = ExpiryReminder(durationMin)
+                    needReminder.add(pkg)
+                }
+
+                // 豁免窗口结束 → 「进入会话」随之结束。
+                // 否则 checkAndTrigger 会命中「pkg == lastAppEnterPkg」分支跳过拦截，
+                // 用户可以无限期继续使用该应用。
+                if (lastAppEnterPkg == pkg) {
+                    lastAppEnterPkg = null
+                    lastAppEnterTimeMs = 0L
+                }
+            }
+            return needReminder
+        }
+    }
+
+    /**
+     * 记录「用户当前停留在哪个应用」
+     *
+     * 由无障碍服务的窗口事件驱动（即时信号，零延迟）：
+     * 用户切到哪个应用就立刻更新，退出也会立刻更新。
+     *
+     * 只接受「窗口获得焦点/处于活动状态」的事件，
+     * 避免应用失去焦点时（弹出输入法、系统弹窗）被误判为已切换。
+     *
+     * @param pkg 当前获得窗口焦点的应用包名
+     */
+    fun onForegroundAppChanged(pkg: String) {
+        if (pkg.isBlank()) return
+        foregroundAppPkg = pkg
+    }
+
+    /**
+     * 用户当前是否停留在指定应用内
+     *
+     * 优先用无障碍窗口事件记录的即时信号；
+     * 若该信号缺失（例如无障碍服务刚重启），回退到轮询引擎观测到的前台包名。
+     *
+     * @param pkg 目标应用包名
+     * @param polledForegroundPkg 轮询引擎观测到的前台包名（可为 null）
+     * @return true 表示用户此刻仍停留在该应用内
+     */
+    fun isUserInside(pkg: String, polledForegroundPkg: String?): Boolean {
+        if (pkg.isBlank()) return false
+        val immediate = foregroundAppPkg
+        if (immediate != null) return immediate == pkg
+        return polledForegroundPkg == pkg
     }
 
     /**
@@ -300,9 +419,38 @@ object AppDetectionManager {
         val until = System.currentTimeMillis() + durationMinutes * 60_000L
         synchronized(this) {
             temporaryExemptUntil[pkg] = until
+            temporaryExemptDuration[pkg] = durationMinutes
             // 持久化，保证进程被杀后豁免窗口依然有效
-            prefs?.edit()?.putLong(exemptionKey(pkg), until)?.apply()
+            prefs?.edit()
+                ?.putLong(exemptionKey(pkg), until)
+                ?.putInt(exemptionDurationKey(pkg), durationMinutes)
+                ?.apply()
         }
+    }
+
+    /**
+     * 该包是否存在待提醒的「时长到期」事件（不移除）
+     */
+    fun hasPendingExpiryReminder(pkg: String): Boolean {
+        synchronized(this) { return pendingExpiryReminder.containsKey(pkg) }
+    }
+
+    /**
+     * 读取该包待提醒的「时长到期」事件（不移除）
+     *
+     * 由弹窗页展示「说好只用 N 分钟」时调用。
+     * 只读不消费：事件在「用户做出选择」或「弹窗关闭」时才清除，
+     * 避免 onNewIntent 重入时读不到分钟数。
+     */
+    fun peekPendingExpiryReminder(pkg: String): ExpiryReminder? {
+        synchronized(this) { return pendingExpiryReminder[pkg] }
+    }
+
+    /**
+     * 取走并清除该包的「时长到期」事件
+     */
+    fun consumePendingExpiryReminder(pkg: String): ExpiryReminder? {
+        synchronized(this) { return pendingExpiryReminder.remove(pkg) }
     }
 
     /**
@@ -321,6 +469,11 @@ object AppDetectionManager {
     private fun exemptionKey(pkg: String) = "$KEY_EXEMPTION_PREFIX$pkg"
 
     /**
+     * 豁免时长（分钟）的 SharedPreferences 键
+     */
+    private fun exemptionDurationKey(pkg: String) = "$KEY_EXEMPTION_DURATION_PREFIX$pkg"
+
+    /**
      * 从持久化存储恢复临时豁免窗口
      * 在 init 中调用：进程被杀后重启时豁免窗口依然有效
      */
@@ -330,10 +483,13 @@ object AppDetectionManager {
         all.forEach { (key, value) ->
             if (!key.startsWith(KEY_EXEMPTION_PREFIX)) return@forEach
             val until = value as? Long ?: return@forEach
+            val pkg = key.removePrefix(KEY_EXEMPTION_PREFIX)
             if (until > now) {
-                temporaryExemptUntil[key.removePrefix(KEY_EXEMPTION_PREFIX)] = until
+                temporaryExemptUntil[pkg] = until
+                temporaryExemptDuration[pkg] =
+                    prefs?.getInt(exemptionDurationKey(pkg), 0) ?: 0
             } else {
-                prefs?.edit()?.remove(key)?.apply()
+                prefs?.edit()?.remove(key)?.remove(exemptionDurationKey(pkg))?.apply()
             }
         }
     }
@@ -387,9 +543,14 @@ object AppDetectionManager {
     private fun clearExemptions() {
         synchronized(this) {
             temporaryExemptUntil.clear()
+            temporaryExemptDuration.clear()
+            pendingExpiryReminder.clear()
+            foregroundAppPkg = null
             val editor = prefs?.edit() ?: return
             prefs?.all?.keys?.forEach { key ->
-                if (key.startsWith(KEY_EXEMPTION_PREFIX)) {
+                if (key.startsWith(KEY_EXEMPTION_PREFIX) ||
+                    key.startsWith(KEY_EXEMPTION_DURATION_PREFIX)
+                ) {
                     editor.remove(key)
                 }
             }
@@ -491,11 +652,12 @@ object AppDetectionManager {
      * 3. 若 pkg == lastAppEnterPkg（用户刚「进入」该应用且未离开），返回 false
      *    —— 交由 checkRecurringTrigger 处理持续使用再提醒，避免进入后立即重复弹窗
      * 4. Quiz 未显示时，使用 5 秒时间窗口去重防止事件抖动
+     *
      * @param pkg 触发的应用包名
-     * @return 是否应该触发（true 表示应该弹出拦截页，false 表示被去重过滤）
+     * @return 触发类型；null 表示被去重过滤，本次不弹窗
      */
-    fun checkAndTrigger(pkg: String): Boolean {
-        if (!shouldBlock(pkg)) return false
+    fun checkAndTrigger(pkg: String): QuizTrigger? {
+        if (!shouldBlock(pkg)) return null
 
         val now = System.currentTimeMillis()
         val shouldTrigger = synchronized(this) {
@@ -521,10 +683,18 @@ object AppDetectionManager {
                 }
             }
         }
-        if (shouldTrigger) {
-            managerScope.launch { appRepository?.incrementBlockCount(pkg) }
+        if (!shouldTrigger) return null
+
+        managerScope.launch { appRepository?.incrementBlockCount(pkg) }
+
+        // 豁免窗口刚刚到期 → 本次是「用户自己选的时长到了」的提醒
+        // 注意：这里只做「查看」不消费，具体分钟数由弹窗链路消费，
+        // 这样弹窗启动失败时到期事件不会丢失。
+        return if (hasPendingExpiryReminder(pkg)) {
+            QuizTrigger.EXPIRY
+        } else {
+            QuizTrigger.FIRST
         }
-        return shouldTrigger
     }
 
     /**
@@ -538,11 +708,11 @@ object AppDetectionManager {
      * 5. 距上次进入时间 >= 间隔
      *
      * @param pkg 当前前台应用包名
-     * @return 是否应该弹出 recurring 问答页
+     * @return QuizTrigger.RECURRING 表示触发；null 表示不触发
      */
-    fun checkRecurringTrigger(pkg: String): Boolean {
-        if (!shouldBlock(pkg)) return false
-        if (recurringIntervalMin <= 0) return false
+    fun checkRecurringTrigger(pkg: String): QuizTrigger? {
+        if (!shouldBlock(pkg)) return null
+        if (recurringIntervalMin <= 0) return null
 
         val now = System.currentTimeMillis()
         val intervalMs = recurringIntervalMin.toLong() * 60_000L
@@ -560,10 +730,10 @@ object AppDetectionManager {
                 }
             }
         }
-        if (shouldTrigger) {
-            managerScope.launch { appRepository?.incrementBlockCount(pkg) }
-        }
-        return shouldTrigger
+        if (!shouldTrigger) return null
+
+        managerScope.launch { appRepository?.incrementBlockCount(pkg) }
+        return QuizTrigger.RECURRING
     }
 
     /**
@@ -607,6 +777,9 @@ object AppDetectionManager {
         synchronized(this) {
             val wasRecurring = lastAppEnterPkg != null && lastTriggeredPkg == lastAppEnterPkg
             isQuizShowing = false
+            // 「时长到期」事件在弹窗展示时已消费；此处再兜底一次，
+            // 防止弹窗未展示就被关闭时事件残留、误用于后续弹窗
+            currentQuizTarget?.let { pendingExpiryReminder.remove(it) }
             currentQuizTarget = null
             // 重置去重状态，确保 Quiz 关闭后能立即重新拦截
             lastTriggeredPkg = null

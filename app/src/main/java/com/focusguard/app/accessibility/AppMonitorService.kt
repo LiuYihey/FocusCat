@@ -8,6 +8,7 @@ import android.view.accessibility.AccessibilityEvent
 import com.focusguard.app.ReflectionActivity
 import com.focusguard.app.data.local.AppDatabase
 import com.focusguard.app.detection.AppDetectionManager
+import com.focusguard.app.detection.QuizTrigger
 import com.focusguard.app.service.FocusGuardService
 import com.focusguard.app.service.KeepAliveManager
 import kotlinx.coroutines.CoroutineScope
@@ -92,12 +93,23 @@ class AppMonitorService : AccessibilityService() {
         val packageName = event.packageName?.toString() ?: return
         if (packageName.isBlank()) return
 
+        // 记录「用户当前停留在哪个应用」（即时信号）
+        // 窗口事件是实时的，不受 UsageStats 前台信息刷新延迟影响，
+        // 用于「使用时长到期」时准确判断用户是否仍在被约束应用内。
+        //
+        // 自身包名也要记录：用户切到 FocusCat 时同样说明他离开了被约束应用。
+        // 系统 UI（通知栏、输入法等）不是用户真正停留的应用，忽略。
+        if (!packageName.startsWith("com.android.systemui")) {
+            AppDetectionManager.onForegroundAppChanged(packageName)
+        }
+
         // 过滤自身包名，避免循环触发
         if (packageName == this.packageName) return
 
         // 检查是否需要拦截（包含5秒去重逻辑）
-        if (AppDetectionManager.checkAndTrigger(packageName)) {
-            launchReflectionActivity(packageName)
+        val trigger = AppDetectionManager.checkAndTrigger(packageName)
+        if (trigger != null) {
+            launchReflectionActivity(packageName, trigger)
         }
     }
 
@@ -143,8 +155,9 @@ class AppMonitorService : AccessibilityService() {
      *    由前台服务（看门狗会确保其存活）消费后启动。
      *
      * @param targetPackage 触发的应用包名
+     * @param trigger 触发类型（首次拦截 / 持续使用再次提醒 / 使用时长到期）
      */
-    private fun launchReflectionActivity(targetPackage: String) {
+    private fun launchReflectionActivity(targetPackage: String, trigger: QuizTrigger) {
         // 记录拦截次数
         serviceScope.launch {
             try {
@@ -170,16 +183,16 @@ class AppMonitorService : AccessibilityService() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 putExtra(ReflectionActivity.EXTRA_TARGET_PACKAGE, targetPackage)
-                putExtra(ReflectionActivity.EXTRA_IS_RECURRING, false)
+                putExtra(ReflectionActivity.EXTRA_TRIGGER, trigger.name)
             }
             startActivity(intent)
             // 直启成功，仍提交 pendingTrigger 作为备份：
             // 若直启的 Activity 被系统立即回收（极端情况），前台服务还能补救
-            AppDetectionManager.postPendingTrigger(targetPackage, false)
+            AppDetectionManager.postPendingTrigger(targetPackage, trigger)
         } catch (e: Exception) {
             // 路径 2：直启失败（部分 ROM 不给无障碍服务 BAL 豁免）
             // 回退到 pendingTrigger，由前台服务消费后启动
-            AppDetectionManager.postPendingTrigger(targetPackage, false)
+            AppDetectionManager.postPendingTrigger(targetPackage, trigger)
             // 修复 D：直启失败时再次拉起前台服务，确保 pending trigger 有消费者
             // 无障碍服务有 BAL 豁免，可启动前台服务；FocusGuardService.onStartCommand 是幂等的
             try {

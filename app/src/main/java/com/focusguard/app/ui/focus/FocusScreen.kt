@@ -315,7 +315,7 @@ private fun FocusTimer(
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 modifier = Modifier.offset {
-                    IntOffset(0, -(timerFontPx * 0.45f).roundToInt())
+                    IntOffset(0, -(timerFontPx * 0.32f).roundToInt())
                 }
             )
         }
