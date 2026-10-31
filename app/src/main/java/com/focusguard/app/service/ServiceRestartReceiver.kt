@@ -48,45 +48,75 @@ class ServiceRestartReceiver : BroadcastReceiver() {
         // 若系统开关被关闭则发通知引导用户重新开启；
         // 若开关还在只是进程被杀，此刻进程已被系统重建，系统会自动重绑无障碍服务。
         KeepAliveManager.checkAccessibilityHealth(context)
-        // 重排下一次守护闹钟（一次性闹钟 → 保持链式唤醒）
-        KeepAliveManager.schedule(context)
+
+        // 需求 1+4（实测修复）：三种广播各自续自己的链，互不推后对方的排期。
+        // 2 分钟看门狗广播不能碰 KeepAliveManager 的精确闹钟排期 ——
+        // 看门狗每 2 分钟触发一次，若每次都把精确闹钟重排到"当前时刻 + 3 分钟"，
+        // 精确闹钟会被无限推后，永远等不到触发点（实测 dumpsys 中该闹钟被反复取消重排）。
+        when (intent?.action) {
+            KeepAliveManager.ACTION_KEEPALIVE_ALARM -> {
+                // 精确闹钟链：续上下一次
+                KeepAliveManager.continueAlarmChain(context)
+            }
+            ACTION_WATCHDOG -> {
+                // 看门狗链（链式精确闹钟）：续上下一次
+                schedule(context)
+            }
+            else -> {
+                // 一次性服务重启广播：不需要续链（它本身就是一次性的）
+            }
+        }
     }
 
     companion object {
-        /** 周期性闹钟间隔（毫秒）- 2 分钟，AlarmManager 最小重复间隔建议 5 分钟
+        /** 看门狗闹钟间隔（毫秒）- 2 分钟
          *  修复 Bug 3：原 5 分钟间隔过长，服务被杀后最多需等 5 分钟才能恢复，
          *  缩短到 2 分钟提升恢复及时性 */
         private const val ALARM_INTERVAL_MS = 2 * 60 * 1000L
 
-        /** 周期性闹钟的 PendingIntent 请求码 */
+        /** 看门狗闹钟的 PendingIntent 请求码 */
         private const val REQUEST_CODE = 2001
 
         /** 一次性重启闹钟的 PendingIntent 请求码（FocusGuardService.onDestroy/onTaskRemoved 调用） */
         const val REQUEST_CODE_RESTART = 2002
 
+        /** 看门狗广播的 action（与 KeepAliveManager 的精确闹钟区分） */
+        private const val ACTION_WATCHDOG = "com.focusguard.app.action.SERVICE_WATCHDOG"
+
+        /** 服务重启广播的 action（FocusGuardService.onDestroy/onTaskRemoved 触发） */
+        const val ACTION_RESTART = "com.focusguard.app.action.SERVICE_RESTART"
+
         /**
-         * 注册定时闹钟（守护开启时调用）
-         * 使用 setInexactRepeating：系统合并多应用闹钟更省电，且不受 Android 12+ 精确闹钟限制
+         * 注册看门狗闹钟（守护开启时调用）
+         *
+         * 改用链式精确闹钟（原为 setInexactRepeating）：
+         * setInexactRepeating 在 Doze / 深度休眠下会被系统大幅延迟甚至丢弃，
+         * 实测 dumpsys 中该闹钟带 window=+1m30s0ms 的不精确窗口，
+         * 这正是"退出后台后无障碍服务迟迟不恢复"的直接原因之一。
+         *
+         * 链式模型：每次触发时在 onReceive 里续上下一次（见 KeepAliveManager 的闹钟链）。
+         * 无精确闹钟权限时降级为 setAndAllowWhileIdle（Doze 下仍可唤醒）。
          */
         fun schedule(context: Context) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
                 ?: return
-            val intent = Intent(context, ServiceRestartReceiver::class.java)
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                REQUEST_CODE,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
+            val pendingIntent = buildPendingIntent(context)
             // 先取消已有闹钟，避免重复注册导致多次触发
             alarmManager.cancel(pendingIntent)
-            // setInexactRepeating：系统会合并多个应用的闹钟，更省电
-            alarmManager.setInexactRepeating(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                android.os.SystemClock.elapsedRealtime() + ALARM_INTERVAL_MS,
-                ALARM_INTERVAL_MS,
-                pendingIntent
-            )
+            val triggerAt = android.os.SystemClock.elapsedRealtime() + ALARM_INTERVAL_MS
+            if (KeepAliveManager.canScheduleExactAlarms(context)) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerAt,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerAt,
+                    pendingIntent
+                )
+            }
         }
 
         /**
@@ -95,14 +125,19 @@ class ServiceRestartReceiver : BroadcastReceiver() {
         fun cancel(context: Context) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
                 ?: return
-            val intent = Intent(context, ServiceRestartReceiver::class.java)
-            val pendingIntent = PendingIntent.getBroadcast(
+            alarmManager.cancel(buildPendingIntent(context))
+        }
+
+        private fun buildPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(context, ServiceRestartReceiver::class.java).apply {
+                action = ACTION_WATCHDOG
+            }
+            return PendingIntent.getBroadcast(
                 context,
                 REQUEST_CODE,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            alarmManager.cancel(pendingIntent)
         }
     }
 }

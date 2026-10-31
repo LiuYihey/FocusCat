@@ -7,6 +7,7 @@ import com.focusguard.app.data.repository.AppRepositoryImpl
 import com.focusguard.app.service.FocusGuardService
 import com.focusguard.app.service.KeepAliveManager
 import com.focusguard.app.service.ServiceRestartReceiver
+import com.focusguard.app.util.PermissionHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,6 +34,9 @@ object AppDetectionManager {
 
     /** 临时豁免窗口的存储 Key 前缀（需求 3），完整键 = 前缀 + 包名 */
     private const val KEY_EXEMPTION_PREFIX = "exempt_until_"
+
+    /** 无障碍服务被系统关闭的标记（需求 1/4），跨进程存活 */
+    private const val KEY_ACCESSIBILITY_DISABLED = "accessibility_disabled"
 
     /** 再次提醒间隔默认值（分钟）—— 每使用 30 分钟再次弹出问答 */
     private const val DEFAULT_RECURRING_INTERVAL_MIN = 30
@@ -83,9 +87,14 @@ object AppDetectionManager {
     /**
      * 标记无障碍服务已被系统关闭
      * 由 KeepAliveManager.checkAccessibilityHealth 在检测到系统设置里的开关已关闭时调用
+     *
+     * 持久化（实测修复）：ColorOS 的典型表现是"杀进程 + 关开关"，
+     * 进程被杀后内存态全部丢失，用户重新打开 App 时又看到"正在恢复中"，
+     * 永远不知道守护其实已被系统关闭。写入 SharedPreferences 让状态跨进程存活。
      */
     fun markAccessibilityDisabled() {
         _isAccessibilityDisabled.value = true
+        prefs?.edit()?.putBoolean(KEY_ACCESSIBILITY_DISABLED, true)?.apply()
     }
 
     /**
@@ -94,6 +103,7 @@ object AppDetectionManager {
      */
     fun markAccessibilityRestored() {
         _isAccessibilityDisabled.value = false
+        prefs?.edit()?.remove(KEY_ACCESSIBILITY_DISABLED)?.apply()
     }
 
     /** 上次触发的应用包名（用于去重） */
@@ -198,6 +208,18 @@ object AppDetectionManager {
         isProtectionEnabled = prefs?.getBoolean(KEY_PROTECTION_ENABLED, false) ?: false
         recurringIntervalMin = prefs?.getInt(KEY_RECURRING_INTERVAL_MIN, DEFAULT_RECURRING_INTERVAL_MIN)
             ?: DEFAULT_RECURRING_INTERVAL_MIN
+        // 恢复「无障碍已被系统关闭」标记（需求 1/4）：
+        // ColorOS 杀进程后内存态丢失，用户回到 App 会误以为"正在恢复中"。
+        // 但若此刻系统开关其实已恢复（用户已手动开回来），应以系统实际状态为准 → 清除标记。
+        // 注意：必须无条件以系统实际状态为准，不能只在标记为 true 时才去查系统开关 ——
+        // 否则进程重建后标记会一直挂着，设置页永远显示"已被系统关闭"（实测误报）。
+        if (!PermissionHelper.checkAccessibilityPermission(context)) {
+            _isAccessibilityDisabled.value =
+                prefs?.getBoolean(KEY_ACCESSIBILITY_DISABLED, false) ?: false
+        } else {
+            _isAccessibilityDisabled.value = false
+            prefs?.edit()?.remove(KEY_ACCESSIBILITY_DISABLED)?.apply()
+        }
         // 恢复临时豁免窗口（需求 3）：进程被杀后重启，豁免窗口依然有效
         restoreExemptions()
         // 注意：lastAppEnterPkg / lastAppEnterTimeMs 不持久化

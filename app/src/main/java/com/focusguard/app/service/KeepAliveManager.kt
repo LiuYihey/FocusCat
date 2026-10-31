@@ -47,6 +47,15 @@ object KeepAliveManager {
     /** AlarmManager 守护闹钟的 PendingIntent 请求码 */
     private const val ALARM_REQUEST_CODE = 42002
 
+    /** 精确守护闹钟的广播 action（用于与 2 分钟看门狗广播区分） */
+    const val ACTION_KEEPALIVE_ALARM = "com.focusguard.app.action.KEEPALIVE_ALARM"
+
+    /** 保活状态持久化文件名 */
+    private const val PREFS_NAME = "focus_guard_keepalive"
+
+    /** 精确闹钟最近一次排程时刻 */
+    private const val KEY_ALARM_SCHEDULED_AT = "alarm_scheduled_at"
+
     /** JobScheduler 周期（毫秒）——系统最小周期为 15 分钟 */
     private const val JOB_INTERVAL_MS = 15 * 60 * 1000L
 
@@ -86,11 +95,21 @@ object KeepAliveManager {
      *
      * setPersisted(true)：设备重启后任务依然保留（需 RECEIVE_BOOT_COMPLETED 权限，已在清单声明）。
      * 这是"进程被 ROM 杀掉后仍能自动复活"的关键。
+     *
+     * 幂等保护（实测修复）：JobScheduler.schedule() 对同一 jobId 是"替换"语义，
+     * 每次调用都会重置 15 分钟周期的计时起点。而 schedule() 的调用点非常多
+     * （每次无障碍服务连接/断开、每次前台服务启动、每次打开 App、每次开机），
+     * 前台服务看门狗更是每 60 秒触发一次 → 周期任务被无限推后，永远等不到 15 分钟就重新计时，
+     * 实测 dumpsys 里出现了 11 个独立的 job 上下文，且周期被重置成 15 分钟而非按期执行。
+     *
+     * 因此必须先查询 getPendingJob()：任务已存在则不重复注册，保持系统原有计时。
      */
     private fun scheduleJob(context: Context) {
         try {
             val jobScheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as? JobScheduler
                 ?: return
+            // 已存在 → 保持系统原有排期，不重置周期
+            if (jobScheduler.getPendingJob(JOB_ID) != null) return
             val jobInfo = JobInfo.Builder(
                 JOB_ID,
                 ComponentName(context, KeepAliveJobService::class.java)
@@ -124,8 +143,29 @@ object KeepAliveManager {
      * Android 12+ 精确闹钟需要 SCHEDULE_EXACT_ALARM 权限且用户可能已撤销，
      * 因此必须先 canScheduleExactAlarms() 判断，失败则降级为
      * setAndAllowWhileIdle（Doze 下可唤醒，仅时间不精确）。
+     *
+     * 幂等保护（实测修复）：本方法会 cancel 旧闹钟并按"当前时刻 + 3 分钟"重新排期。
+     * 而 schedule() 的调用点里，前台服务看门狗每 60 秒就会触发一次
+     * （FocusGuardService.onStartCommand → KeepAliveManager.schedule）。
+     * 结果是 3 分钟的精确闹钟每分钟被推后一次，永远等不到触发点，形同虚设
+     * （实测 dumpsys alarm 中该闹钟被反复 alarm_cancelled / pi_cancelled）。
+     *
+     * 因此改为"链式"模型：闹钟已排上且未过期时不再推后，
+     * 由闹钟真正触发时（ServiceRestartReceiver 收到精确闹钟广播）主动续上下一次。
      */
     private fun scheduleAlarm(context: Context) {
+        if (isAlarmActive(context)) return
+        rearmAlarm(context)
+    }
+
+    /**
+     * 强制重排守护闹钟（续链）
+     *
+     * 仅两种场景调用：
+     * 1. 链上还没有闹钟时（首次排程）
+     * 2. 精确闹钟真正触发后，续上下一次
+     */
+    private fun rearmAlarm(context: Context) {
         try {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
                 ?: return
@@ -146,6 +186,7 @@ object KeepAliveManager {
                     pendingIntent
                 )
             }
+            markAlarmScheduled(context)
         } catch (e: Exception) {
             // 降级到不精确重复闹钟
             try {
@@ -157,10 +198,44 @@ object KeepAliveManager {
                     ALARM_INTERVAL_INEXACT_MS,
                     buildAlarmPendingIntent(context)
                 )
+                markAlarmScheduled(context)
             } catch (e2: Exception) {
                 // 忽略
             }
         }
+    }
+
+    /**
+     * 续接精确闹钟链
+     *
+     * 由 ServiceRestartReceiver 在收到【精确闹钟】广播时调用。
+     * 与 2 分钟看门狗广播区分开：看门狗不碰本闹钟的排期，
+     * 否则看门狗每 2 分钟推后一次，精确闹钟永远等不到触发。
+     */
+    fun continueAlarmChain(context: Context) {
+        rearmAlarm(context)
+    }
+
+    /**
+     * 链上是否已有等待触发的闹钟
+     *
+     * 时间戳存 SharedPreferences：进程被杀后标记仍在，
+     * 避免进程重启瞬间把已在等待的闹钟推后。
+     * 超过 2 个周期仍未触发 → 视为链已断（receiver 未跑完 / 被 ROM 掐断），允许重建。
+     */
+    private fun isAlarmActive(context: Context): Boolean {
+        val scheduledAt = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getLong(KEY_ALARM_SCHEDULED_AT, 0L)
+        if (scheduledAt == 0L) return false
+        val elapsed = System.currentTimeMillis() - scheduledAt
+        return elapsed in 0 until (ALARM_INTERVAL_EXACT_MS * 2)
+    }
+
+    private fun markAlarmScheduled(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_ALARM_SCHEDULED_AT, System.currentTimeMillis())
+            .apply()
     }
 
     private fun cancelAlarm(context: Context) {
@@ -171,10 +246,17 @@ object KeepAliveManager {
         } catch (e: Exception) {
             // 忽略
         }
+        // 清除排程标记，保证下次开启守护时闹钟立即排上
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_ALARM_SCHEDULED_AT)
+            .apply()
     }
 
     private fun buildAlarmPendingIntent(context: Context): PendingIntent {
-        val intent = Intent(context, ServiceRestartReceiver::class.java)
+        val intent = Intent(context, ServiceRestartReceiver::class.java).apply {
+            action = ACTION_KEEPALIVE_ALARM
+        }
         return PendingIntent.getBroadcast(
             context,
             ALARM_REQUEST_CODE,
@@ -233,6 +315,9 @@ object KeepAliveManager {
             // 场景 A：开关还在，只是当前进程没连上。
             // 保持前台服务与守护闹钟存活，进程重建后系统会自动重绑。
             ensureForegroundService(context)
+            // 自愈（实测修复误报）：检测到开关确实还在时，主动清除"已被系统关闭"标记。
+            // 原实现只在关闭时打标记、从不主动清除，导致一次误判后提示永远挂着。
+            AppDetectionManager.markAccessibilityRestored()
         } else {
             // 场景 B：开关被关闭 —— 引导用户手动重新开启
             AppDetectionManager.markAccessibilityDisabled()

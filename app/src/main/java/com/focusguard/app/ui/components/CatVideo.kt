@@ -93,6 +93,21 @@ fun CatVideo(
     val currentLoop = rememberUpdatedState(loop)
     val currentContentKey = rememberUpdatedState(contentKey)
 
+    // === MediaItem 代次计数器（需求 2 修复）===
+    //
+    // 背景：在同一个 ExoPlayer 实例上重复调用 setMediaItem 时，ExoPlayer 可能把
+    // 上一个 MediaItem 的 STATE_ENDED 残留事件投递给监听器。该事件如果被误当作
+    // "当前视频播放完毕"消费，会立刻触发 onCompletion → 上层切换到下一个视频
+    // → 随机起跳标记 pendingRandomSeek 被覆盖为 false → 随机起点彻底失效。
+    //
+    // 解决：每次 setMediaItem 自增 generation，事件回调只接受"当前代次"的事件，
+    // 旧代次的残留事件直接丢弃。
+    var mediaItemGeneration by remember { mutableStateOf(0) }
+
+    // 已确认 READY 的代次：只有该代次的视频才算"真正开始播放"，
+    // 其 ENDED 事件才是有效的"播放完毕"信号
+    var readyGeneration by remember { mutableStateOf(0) }
+
     // === 播放器健康状态 ===
     // true = 视频正在渲染，显示 PlayerView
     // false = 首次加载中 / 真正异常，显示 fallbackBitmap
@@ -129,6 +144,10 @@ fun CatVideo(
         // videoPath 单独变化（待机动画序列切换）不重复跳位
         pendingRandomSeek = randomStart && randomConsumedKey != contentKey
         val assetUri = "asset:///$videoPath"
+        // 代次自增：新 MediaItem 尚未 READY，先把 readyGeneration 置为 0，
+        // 确保旧代次的 READY 记录不会让新代次的 ENDED 被误判为有效
+        mediaItemGeneration += 1
+        readyGeneration = 0
         exoPlayer.setMediaItem(MediaItem.fromUri(assetUri))
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
@@ -156,6 +175,8 @@ fun CatVideo(
                         isVideoHealthy = true
                         bufferingSince = null
                         renderedContentKey = currentContentKey.value
+                        // 记录当前代次已就绪：此代次后续的 ENDED 才是有效的"播放完毕"
+                        readyGeneration = mediaItemGeneration
                         // 随机起跳：READY 后才知道视频时长，此刻取随机位置并 seek
                         if (pendingRandomSeek) {
                             pendingRandomSeek = false
@@ -175,12 +196,23 @@ fun CatVideo(
                         bufferingSince = null
                     }
                     Player.STATE_ENDED -> {
+                        // 有效性校验（需求 2 修复）：
+                        // 播放器在 setMediaItem 之前可能处于初始 ENDED 状态，
+                        // 该残留事件绝不能被当作"当前视频播放完毕"，
+                        // 否则会立刻触发 onCompletion 切走视频，随机起点随之失效。
+                        // 只有"当前代次已 READY 过"的 ENDED 才是真正的播放结束。
+                        val isCurrentItemEnded =
+                            readyGeneration == mediaItemGeneration && mediaItemGeneration > 0
+
                         // loop=true 模式下出现 ENDED 是异常（应自动循环）→ 不健康
                         if (currentLoop.value) {
                             isVideoHealthy = false
                         }
                         // loop=false 的正常结束 → 触发回调
-                        if (currentOnCompletion.value != null && !currentLoop.value) {
+                        if (isCurrentItemEnded &&
+                            currentOnCompletion.value != null &&
+                            !currentLoop.value
+                        ) {
                             currentOnCompletion.value?.invoke()
                         }
                     }

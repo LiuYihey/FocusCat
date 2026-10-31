@@ -48,12 +48,11 @@ class AppMonitorService : AccessibilityService() {
     /** 主线程 Handler，用于延迟上报断连（修复 B：防 ROM 临时解绑→重绑的 UI 闪烁） */
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** 待执行的断连上报 Runnable，onServiceConnected 时取消 */
-    private var pendingDisconnectReport: Runnable? = null
-
     override fun onServiceConnected() {
         super.onServiceConnected()
         // 修复 B：取消待执行的断连上报——系统在 onUnbind 后快速重新绑定时不报故障
+        // 注意：此处取消的是 companion 中的进程级任务，
+        // 因此新实例（重新绑定后创建的实例）也能取消旧实例挂的任务
         pendingDisconnectReport?.let { mainHandler.removeCallbacks(it) }
         pendingDisconnectReport = null
         // 重建协程作用域：服务可能被系统断开后重新绑定，
@@ -201,15 +200,23 @@ class AppMonitorService : AccessibilityService() {
         // 原代码立即 setAccessibilityConnected(false) 导致 UI 闪烁「故障」，
         // 即使 1 秒后系统重新绑定用户也已看到错误提示。
         // 改为 15 秒后若仍未重新绑定，才真正上报断连。
-        pendingDisconnectReport = Runnable {
+        // 用数组持有 Runnable 自身引用：Kotlin 的 lambda 无法直接引用自身定义的局部变量，
+        // 通过 holder 实现"身份校验"（防止旧任务覆盖新任务）
+        val holder = arrayOfNulls<Runnable>(1)
+        val report = Runnable {
+            // 身份校验：若期间已被新的断连任务替换（新的 onUnbind），本任务已过期，直接退出。
+            // 否则旧的 runnable 会把新任务置空，导致新的断连永远不上报。
+            if (pendingDisconnectReport !== holder[0]) return@Runnable
+            pendingDisconnectReport = null
             AppDetectionManager.setAccessibilityConnected(false)
             // 需求 1+4：断连后立即做一次无障碍健康自检
             // - 若系统开关仍开启 → 说明只是进程被杀，保活任务会重建进程并自动重绑
             // - 若系统开关已被关闭 → 立刻通知用户手动重新开启
             KeepAliveManager.checkAccessibilityHealth(this@AppMonitorService)
-            pendingDisconnectReport = null
         }
-        mainHandler.postDelayed(pendingDisconnectReport!!, DISCONNECT_REPORT_DELAY_MS)
+        holder[0] = report
+        pendingDisconnectReport = report
+        mainHandler.postDelayed(report, DISCONNECT_REPORT_DELAY_MS)
         watchdogJob?.cancel()
         serviceScope.cancel()
         // 需求 1+4：断连即重排保活任务，尽早恢复无障碍绑定
@@ -222,5 +229,26 @@ class AppMonitorService : AccessibilityService() {
         private const val WATCHDOG_INTERVAL_MS = 60_000L
         /** 断连上报延迟（毫秒）- 15 秒，过滤 ROM 临时解绑→重绑的瞬态 */
         private const val DISCONNECT_REPORT_DELAY_MS = 15_000L
+
+        /**
+         * 主线程 Handler（进程级）
+         * 必须与 pendingDisconnectReport 同为进程级，
+         * 否则新实例（系统重新绑定时创建）无法取消旧实例挂的延迟任务
+         */
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        /**
+         * 待执行的断连上报 Runnable（进程级）
+         *
+         * 必须是【进程级】而非实例级（实测修复）：
+         * 系统重新绑定无障碍服务时会创建**新的 AppMonitorService 实例**（实例 B），
+         * 而 onUnbind 是旧实例（实例 A）挂的延迟任务。
+         * 若该 Runnable 存在实例字段里，实例 B 的 onServiceConnected 拿到的是自己的 null，
+         * 取消不掉实例 A 的那条任务 → 15 秒后旧任务触发 setAccessibilityConnected(false)，
+         * 造成「服务明明已绑定，设置页却一直显示『正在恢复中』」的假故障（实测复现）。
+         *
+         * AppDetectionManager 本身就是进程级单例，断连状态必须与之同生命周期。
+         */
+        private var pendingDisconnectReport: Runnable? = null
     }
 }

@@ -145,7 +145,9 @@ class FocusGuardService : android.app.Service() {
         try {
             val alarmManager = getSystemService(android.content.Context.ALARM_SERVICE) as? AlarmManager
                 ?: return
-            val intent = android.content.Intent(this, ServiceRestartReceiver::class.java)
+            val intent = android.content.Intent(this, ServiceRestartReceiver::class.java).apply {
+                action = ServiceRestartReceiver.ACTION_RESTART
+            }
             val pendingIntent = android.app.PendingIntent.getBroadcast(
                 this,
                 ServiceRestartReceiver.REQUEST_CODE_RESTART,
@@ -153,16 +155,28 @@ class FocusGuardService : android.app.Service() {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
             )
             // 一次性闹钟，1 秒后触发（setExact 比 setInexactRepeating 更及时）
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            // Android 12+ 精确闹钟需要 SCHEDULE_EXACT_ALARM 权限且用户可随时撤销，
+            // 未授权时 setExactAndAllowWhileIdle 会抛 SecurityException →
+            // 降级为 setAndAllowWhileIdle（Doze 下仍可唤醒，仅时间不精确）。
+            val triggerAt = android.os.SystemClock.elapsedRealtime() + 1000L
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+                !KeepAliveManager.canScheduleExactAlarms(this)
+            ) {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    triggerAt,
+                    pendingIntent
+                )
+            } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    android.os.SystemClock.elapsedRealtime() + 1000L,
+                    triggerAt,
                     pendingIntent
                 )
             } else {
                 alarmManager.setExact(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    android.os.SystemClock.elapsedRealtime() + 1000L,
+                    triggerAt,
                     pendingIntent
                 )
             }

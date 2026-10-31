@@ -13,10 +13,16 @@ android {
         applicationId = "com.focusguard.app"
         minSdk = 26
         targetSdk = 35
-        // FocusCat v1.2.0 - 正式发布版本
+        // FocusCat v1.2.1 - 正式发布版本
         // v1.2.0：无障碍保活（ColorOS）、视频随机起点、反思弹窗选择题 + 使用时长豁免
-        versionCode = 120
-        versionName = "1.2.0"
+        // v1.2.1：实测修复三个真实缺陷
+        //   1) 设置页误报「无障碍服务已被系统关闭」——改为 AccessibilityManager + Settings 双源判定，
+        //      并在检测到开关仍在时主动清除标记（自愈）
+        //   2) 无障碍已绑定却一直显示「正在恢复中」——断连上报状态改为进程级，
+        //      避免系统重绑时新实例取消不掉旧实例挂的延迟任务
+        //   3) JobScheduler 重复注册 / AlarmManager 精确闹钟被无限推后 —— 幂等注册 + 链式闹钟模型
+        versionCode = 121
+        versionName = "1.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

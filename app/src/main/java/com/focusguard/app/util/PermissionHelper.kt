@@ -1,5 +1,6 @@
 package com.focusguard.app.util
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
@@ -8,6 +9,7 @@ import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import android.text.TextUtils
+import android.view.accessibility.AccessibilityManager
 
 /**
  * 权限检查工具类
@@ -48,9 +50,52 @@ object PermissionHelper {
 
     /**
      * 检查无障碍服务是否启用
-     * 通过遍历 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES 检查是否包含本应用包名
+     *
+     * 双重判定（实测修复误报）：
+     * 1. 首选 AccessibilityManager.getEnabledAccessibilityServiceList() ——
+     *    这是系统给出的"当前已启用无障碍服务"权威列表，不受 Settings 字符串格式影响。
+     * 2. 回退 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES 字符串匹配 ——
+     *    部分 ROM 上 AccessibilityManager 返回空但设置里确实已开启。
+     *
+     * 两者任一命中即视为已启用。
      */
     fun checkAccessibilityPermission(context: Context): Boolean {
+        if (isAccessibilityServiceEnabledByManager(context)) return true
+        return isAccessibilityServiceEnabledBySettings(context)
+    }
+
+    /**
+     * 通过 AccessibilityManager 查询系统当前已启用的无障碍服务列表
+     * 这是判断"系统开关是否还在"最可靠的来源
+     */
+    private fun isAccessibilityServiceEnabledByManager(context: Context): Boolean {
+        return try {
+            val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE)
+                as? AccessibilityManager ?: return false
+            val services = manager.getEnabledAccessibilityServiceList(
+                AccessibilityServiceInfo.FEEDBACK_ALL_MASK
+            )
+            services.any { info ->
+                // info.id 形如 "com.focusguard.app/.accessibility.AppMonitorService"，
+                // 是系统给出的扁平化组件名，比 resolveInfo 更稳定（resolveInfo 可能为 null）
+                val id = info.id
+                if (id != null && id.startsWith("${context.packageName}/", ignoreCase = true)) {
+                    return@any true
+                }
+                val serviceInfo = info.resolveInfo?.serviceInfo
+                serviceInfo?.packageName == context.packageName &&
+                    serviceInfo?.name?.contains("AppMonitorService") == true
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 通过 Settings.Secure 字符串匹配判断无障碍服务是否启用
+     * 保留为回退方案：部分 ROM 上 AccessibilityManager 不返回已启用的无障碍服务
+     */
+    private fun isAccessibilityServiceEnabledBySettings(context: Context): Boolean {
         val enabledServices = Settings.Secure.getString(
             context.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
@@ -62,11 +107,17 @@ object PermissionHelper {
         val splitter = TextUtils.SimpleStringSplitter(':')
         splitter.setString(enabledServices)
         for (entry in splitter) {
-            if (entry.equals(serviceName, ignoreCase = true)) {
+            val trimmed = entry.trim()
+            if (trimmed.isEmpty()) continue
+            if (trimmed.equals(serviceName, ignoreCase = true)) {
                 return true
             }
-            // 兼容部分设备只匹配包名的情况
-            if (entry.startsWith("${context.packageName}/", ignoreCase = true)) {
+            // 兼容系统存储的简写形式：包名/.accessibility.AppMonitorService
+            if (trimmed.startsWith("${context.packageName}/", ignoreCase = true)) {
+                return true
+            }
+            // 兼容只记录包名的形式
+            if (trimmed.equals(context.packageName, ignoreCase = true)) {
                 return true
             }
         }
