@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.focusguard.app.ui.components.CatCanvas
+import com.focusguard.app.ui.components.PrimaryButton
+import com.focusguard.app.ui.components.SoftTextField
 
 /**
  * 猫咪选择界面
@@ -116,14 +118,6 @@ fun CatSelectionScreen(
         Text(
             text = if (isSwitchMode) "切换专注伙伴" else "选择你的专注伙伴",
             style = MaterialTheme.typography.headlineMedium
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = if (isSwitchMode) "每只猫咪都有独立的养成进度，切换即恢复"
-            else "它会陪你专注，因你进步而开心",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -195,32 +189,16 @@ fun CatSelectionScreen(
             // 确认切换按钮（仅在未进入添加流程时可用）
             if (!state.isAddingNewCat) {
                 val canConfirm = !state.isCreating && state.selectedExistingCatId != null
-                Button(
+                PrimaryButton(
+                    text = "确认切换",
                     onClick = {
                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                         viewModel.switchToCat()
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                    enabled = canConfirm
-                ) {
-                    if (state.isCreating) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    } else {
-                        Text(
-                            text = "确认切换",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-                }
+                    enabled = canConfirm,
+                    loading = state.isCreating,
+                    containerColor = accentColor
+                )
             }
         } else {
             // === 首次选择模式：品种网格 + 命名 ===
@@ -244,30 +222,33 @@ fun CatSelectionScreen(
 
             // 命名输入框
             val nameIsError = state.errorMessage != null && state.catName.isBlank()
-            OutlinedTextField(
+            SoftTextField(
                 value = state.catName,
                 onValueChange = { viewModel.updateName(it) },
+                label = "给猫咪起个名字",
+                placeholder = "例如：小橘、咪咪...",
                 modifier = Modifier.fillMaxWidth(),
-                label = {
-                    Text(
-                        "给猫咪起个名字",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                placeholder = { Text("例如：小橘、咪咪...", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                shape = RoundedCornerShape(14.dp),
-                singleLine = true,
-                isError = nameIsError,
-                supportingText = {
-                    if (nameIsError) {
-                        Text("请输入猫咪名字", color = com.focusguard.app.ui.theme.ErrorText)
-                    } else {
-                        Text("${state.catName.length}/12", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // 字数 / 错误提示
+            if (nameIsError) {
+                Text(
+                    text = "请输入猫咪名字",
+                    color = com.focusguard.app.ui.theme.ErrorText,
+                    fontSize = 13.sp
+                )
+            } else {
+                Text(
+                    text = "${state.catName.length}/12",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // 品种未选提示
             if (state.selectedBreedId == null) {
@@ -294,32 +275,16 @@ fun CatSelectionScreen(
             val canCreate = !state.isCreating &&
                 state.selectedBreedId != null &&
                 state.catName.isNotBlank()
-            Button(
+            PrimaryButton(
+                text = "确认选择",
                 onClick = {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                     viewModel.createCat()
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                enabled = canCreate
-            ) {
-                if (state.isCreating) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                } else {
-                    Text(
-                        text = "确认选择",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
-            }
+                enabled = canCreate,
+                loading = state.isCreating,
+                containerColor = accentColor
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -500,12 +465,6 @@ private fun AddNewCatCard(
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = accentColor
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "最多两只",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
-                    )
                 } else {
                     // 未解锁：显示锁定状态和成就要求
                     Box(
@@ -532,17 +491,11 @@ private fun AddNewCatCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "解锁「初识之友」成就后开放",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "投喂 10 次即可解锁",
+                        text = "投喂 10 次解锁「初识之友」",
                         color = accentColor,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -602,54 +555,46 @@ private fun AddSecondCatForm(
 
         // 命名输入
         val nameIsError = catName.isBlank()
-        OutlinedTextField(
+        SoftTextField(
             value = catName,
             onValueChange = onNameChanged,
+            label = "给它起个名字",
+            placeholder = "例如：小橘、咪咪...",
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("给它起个名字", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            placeholder = { Text("例如：小橘、咪咪...", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            shape = RoundedCornerShape(14.dp),
-            singleLine = true,
-            isError = nameIsError,
-            supportingText = {
-                if (nameIsError) {
-                    Text("请输入猫咪名字", color = com.focusguard.app.ui.theme.ErrorText)
-                } else {
-                    Text("${catName.length}/12", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            singleLine = true
         )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        if (nameIsError) {
+            Text(
+                text = "请输入猫咪名字",
+                color = com.focusguard.app.ui.theme.ErrorText,
+                fontSize = 13.sp
+            )
+        } else {
+            Text(
+                text = "${catName.length}/12",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp
+            )
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
         // 确认添加按钮
         val canCreate = !isCreating && selectedBreedId != null
-        Button(
+        PrimaryButton(
+            text = "确认添加",
             onClick = {
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                 onCreate()
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-            enabled = canCreate
-        ) {
-            if (isCreating) {
-                CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(22.dp)
-                )
-            } else {
-                Text(
-                    text = "确认添加",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            }
-        }
+            enabled = canCreate,
+            loading = isCreating,
+            height = 48.dp,
+            containerColor = accentColor
+        )
     }
 }
 

@@ -90,6 +90,7 @@ import com.focusguard.app.ui.components.AppCard
 import com.focusguard.app.ui.components.AppCardTokens
 import com.focusguard.app.ui.components.CatCanvas
 import com.focusguard.app.ui.components.FoodCanvas
+import com.focusguard.app.ui.components.PrimaryButton
 import com.focusguard.app.MainActivity
 
 /**
@@ -163,13 +164,6 @@ fun CatScreen(
                     color = textColor,
                     style = MaterialTheme.typography.headlineSmall
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "回到首页完成首次猫咪选择\n即可开启你的陪伴之旅",
-                    color = dimColor,
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center
-                )
             }
         } else {
             // 保存滚动状态，便于"去投喂"跳转后自动滚动到食物库存
@@ -210,33 +204,14 @@ fun CatScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // 开始专注入口：放在猫咪页顶部，打开 App 看到猫即可一键开始
-                Button(
+                PrimaryButton(
+                    text = "开始专注",
                     onClick = {
                         hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onNavigateToFocus()
                     },
-                    modifier = Modifier
-                        .fillMaxWidth(0.7f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = accentColor
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "开始专注",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
+                    enabled = true, containerColor = accentColor, height = 48.dp
+                )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -251,26 +226,6 @@ fun CatScreen(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-
-                // 鼓励语（根据投喂进度变化，避免永远同一句）
-                // 放置在猫咪展示区正下方、好感度卡片上方，让用户进页面立即看到陪伴感的鼓励语
-                val encouragement = when {
-                    userCat.totalFeedCount >= 100 -> "你已经和猫咪成为灵魂伴侣，它最懂你的每一次专注"
-                    userCat.totalFeedCount >= 50 -> "猫咪已经完全信任你，每次投喂都是默契的确认"
-                    userCat.totalFeedCount >= 10 -> "猫咪越来越喜欢你了，它看到你每天都在进步"
-                    else -> "猫咪刚认识你，多投喂几次，它会越来越亲近你"
-                }
-                Text(
-                    text = encouragement,
-                    color = dimColor,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .alpha(0.7f)
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
 
                 // 好感度信息
                 val title = viewModel.getAffinityTitle(userCat.totalFeedCount)
@@ -383,7 +338,7 @@ fun CatScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "添加约束应用 → 开启守护 → 完成反思\n选择退出即可获得食物奖励",
+                            text = "完成反思并退出应用即可获得食物",
                             color = dimColor,
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center,
@@ -391,21 +346,14 @@ fun CatScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         // 可操作按钮：直接跳转到约束应用 Tab
-                        Button(
+                        PrimaryButton(
+                            text = "去添加约束应用",
                             onClick = {
                                 hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                 com.focusguard.app.MainActivity.requestNavigateToApps()
                             },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(AppCardTokens.RadiusLarge),
-                            colors = ButtonDefaults.buttonColors(containerColor = accentColor)
-                        ) {
-                            Text(
-                                text = "去添加约束应用",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
+                            enabled = true, containerColor = accentColor
+                        )
                     }
                 } else {
                     // LazyRow 外层叠加右侧渐变遮罩，暗示"还有更多可滑动"
@@ -614,24 +562,16 @@ private fun AchievementCelebrationDialog(
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(24.dp))
-                        Button(
+                        PrimaryButton(
+                            text = "太棒了！",
                             onClick = {
-                                hapticFeedback.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                hapticFeedback.performHapticFeedback(
+                                    androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove
+                                )
                                 onDismiss()
                             },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = accentColor)
-                        ) {
-                            Text(
-                                text = "太棒了！",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
+                            enabled = true, containerColor = accentColor, height = 48.dp
+                        )
                     }
                 }
             }

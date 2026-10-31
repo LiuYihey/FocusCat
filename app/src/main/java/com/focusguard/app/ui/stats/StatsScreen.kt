@@ -146,13 +146,6 @@ fun StatsScreen(
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text(
-                        text = "开启守护并完成一次反思后\n这里会展示你的专注数据",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        textAlign = TextAlign.Center
-                    )
                     Spacer(modifier = Modifier.size(24.dp))
                     TextButton(
                         onClick = {
@@ -300,13 +293,13 @@ fun StatsScreen(
                 ) {
                     if (rankedApps.isEmpty()) {
                         Text(
-                            text = "完成反思后这里会显示各应用的拦截次数",
+                            text = "暂无拦截记录",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(vertical = 16.dp)
                         )
                     } else {
-                        rankedApps.forEachIndexed { index, app ->
+                        rankedApps.forEach { app ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -358,7 +351,7 @@ private fun TrendChart(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "暂无趋势数据\n完成反思后这里会展示你的专注趋势",
+                text = "暂无趋势数据",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center
@@ -587,14 +580,6 @@ private fun TrendChart(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.size(4.dp))
-                    Text(
-                        text = "再次点击柱子可取消选中",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
-                    )
                 }
             }
         }

@@ -13,16 +13,15 @@ android {
         applicationId = "com.focusguard.app"
         minSdk = 26
         targetSdk = 35
-        // FocusCat v1.2.1 - 正式发布版本
+        // FocusCat v1.2.0 - 正式发布版本
         // v1.2.0：无障碍保活（ColorOS）、视频随机起点、反思弹窗选择题 + 使用时长豁免
-        // v1.2.1：实测修复三个真实缺陷
-        //   1) 设置页误报「无障碍服务已被系统关闭」——改为 AccessibilityManager + Settings 双源判定，
-        //      并在检测到开关仍在时主动清除标记（自愈）
-        //   2) 无障碍已绑定却一直显示「正在恢复中」——断连上报状态改为进程级，
-        //      避免系统重绑时新实例取消不掉旧实例挂的延迟任务
-        //   3) JobScheduler 重复注册 / AlarmManager 精确闹钟被无限推后 —— 幂等注册 + 链式闹钟模型
+        //   + 高定 UI 改版（4 层微明度背景分层 / 输入框聚焦双环阴影 / 暗色字重降 40 /
+        //     正文 text-wrap:pretty / 专注页环形进度计时器 / 全屏沉浸式 / 底栏留白均衡 /
+        //     全局削减二级标签与描述文案）
+        //   + 实测修复保活链路三处真实缺陷（误报 / 假故障 / 调度失效）
+        // 版本号保持 v1.2.0（细微调整不递增）
         versionCode = 121
-        versionName = "1.2.1"
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -102,7 +101,8 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
+        // 1.5.15 匹配 Compose 1.7.x（1.5.8 仅支持 Compose 1.6.x）
+        kotlinCompilerExtensionVersion = "1.5.15"
     }
 
     packaging {
@@ -121,13 +121,15 @@ dependencies {
     // AndroidX 核心
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
-    implementation("androidx.activity:activity-compose:1.8.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.activity:activity-compose:1.9.3")
 
     // Compose
-    implementation(platform("androidx.compose:compose-bom:2024.02.00"))
+    // 2024.09.03 → Compose 1.7.3：提供 LineBreak.Paragraph（等价 CSS text-wrap: pretty，
+    // 避免正文末行孤字），以及 SharedTransition 等新动画 API
+    implementation(platform("androidx.compose:compose-bom:2024.09.03"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")

@@ -6,14 +6,19 @@ import androidx.compose.ui.graphics.Color
  * 应用主题颜色常量
  *
  * 设计语言：Warm Healing · Honey & Cream（温暖治愈 · 蜜糖奶油风）
- * 设计哲学：可爱毛茸茸的陪伴感（approachable warmth）
  *
- * 配色原则：
- * 1. 纯白背景（#FFFFFF）与 AI 生成的纯白底猫咪图无缝融合，让猫咪像"住"在 app 里
- * 2. 蜜糖橙主色（#FF9F43）呼应猫咪主题，温暖明亮治愈
- * 3. 奶油白卡片层（#FFF8E7）通过暖色明度差分层，而非冷灰
- * 4. 错误/警告色用暖橙金调，去"吓人感"（用户偏好暖色调而非红色）
- * 5. 文本用暖深棕而非纯黑，更柔和治愈
+ * ── 分层原则（严格执行）─────────────────────────────────────
+ * 1. 禁黑框与 #000：全 App 不出现纯黑（#000000）与黑色描边，
+ *    所有"框线"一律用暖色调 + 明度分层表达，避免生硬割裂。
+ * 2. 1-3% 微明度 4 层背景分层：背景不是"白 / 灰"两档，而是
+ *    canvas → surface → surfaceRaised → surfaceOverlay 四层，
+ *    每层相对下层只提亮 1-3% 明度，靠极微弱色差建立空间纵深，
+ *    视觉上"平"但不空，达到 Apple / Linear 式的克制质感。
+ * 3. 暗色字重全降 40：深色主题下所有文字字重相对浅色下调一档
+ *    （如 SemiBold → Medium，Bold → SemiBold），因为深底本身
+ *    已经提供了足够的视觉重量，字重再高会显得刺眼、发闷。
+ * 4. 暖色偏移：所有中性色都带 3-6% 的暖偏移（红/黄向），
+ *    避免纯灰带来的"工具感"，与猫咪陪伴的产品调性一致。
  */
 
 // ========== 主色 - 蜜糖橙（Honey Orange）==========
@@ -25,23 +30,26 @@ val PrimaryDark = Color(0xFFE8852A)
 // ========== 强调色 - 浅蜜橙（同色系延伸） ==========
 val Accent = Color(0xFFFFB74D)
 
-// ========== 背景层 - 纯白 + 奶油白 ==========
-// 纯白背景让 AI 生成的白底猫咪图无缝融入，沉浸感最佳
-val Background = Color(0xFFFFFFFF)
-val Surface = Color(0xFFFFFFFF)
-val SurfaceVariant = Color(0xFFFFF8E7) // 奶油白，卡片分层
+// ========== 浅色主题 · 4 层微明度背景分层 ==========
+// 起点仍是纯白（与 AI 生成的纯白底猫咪图无缝融合），
+// 但向下每一层只降 1-3% 明度，形成 canvas → surface → raised → overlay
+val Background = Color(0xFFFFFFFF)        // L0 canvas：纯白底
+val Surface = Color(0xFFFDFBF7)           // L1 surface：比 canvas 暗 1%
+val SurfaceVariant = Color(0xFFF7F1E7)    // L2 raised：比 L1 暗 2.4%
+val SurfaceOverlay = Color(0xFFFBF5EC)    // L3 overlay：悬浮层，比 L2 亮 1%（抬升感）
 
-// ========== 深色主题（跟随系统，暖色调暗色） ==========
-val DarkBackground = Color(0xFF2A2420) // 暖深棕，非冷墨蓝
-val DarkBackgroundDeep = Color(0xFF1F1A16)
-val DarkSurface = Color(0xFF352D27)
-val DarkSurfaceVariant = Color(0xFF443A32)
+// ========== 深色主题 · 4 层微明度背景分层 ==========
+// 底色绝不用 #000：以暖深棕为起点，逐层提亮 1-3%
+val DarkBackground = Color(0xFF221D19)      // L0 canvas：暖深棕，非纯黑
+val DarkSurface = Color(0xFF272220)         // L1 surface：+1.2% 明度
+val DarkSurfaceVariant = Color(0xFF2E2825)  // L2 raised：+2.9% 明度
+val DarkSurfaceOverlay = Color(0xFF332C28)  // L3 overlay：+4.6% 明度（悬浮抬升）
 
 // ========== 文本色（暖深棕，非纯黑） ==========
-val TextPrimary = Color(0xFF3D2E1F) // 暖深棕
-val TextSecondary = Color(0xFF8C7B6B) // 暖灰棕
-val DarkTextPrimary = Color(0xFFF5EBE0) // 暖米白
-val DarkTextSecondary = Color(0xFFC4B5A4)
+val TextPrimary = Color(0xFF3D2E1F)      // 暖深棕
+val TextSecondary = Color(0xFF8C7B6B)    // 暖灰棕
+val DarkTextPrimary = Color(0xFFF0E6DA)  // 暖米白（非纯白，降低眩光）
+val DarkTextSecondary = Color(0xFFB8A897)
 
 // ========== 状态色（暖调，去"吓人感"，用户偏好非红） ==========
 // 成功 - 柔和抹茶绿，温暖治愈
@@ -56,7 +64,26 @@ val Warning = Color(0xFFF59E0B)
 val OnPrimaryDark = Color(0xFFFFF8E7)
 
 // ========== 装饰色（暖调，与蜜糖橙呼应） ==========
-val StarGold = Color(0xFFE8B547) // 暖金
-val RarityCommon = Color(0xFFB0A899) // 暖灰
-val RarityRare = Color(0xFF6BA3C4) // 雾蓝（稀有，冷色点缀平衡）
-val RarityEpic = Color(0xFFC17767) // 暖红棕（史诗，珍贵感）
+val StarGold = Color(0xFFE8B547)      // 暖金
+val RarityCommon = Color(0xFFB0A899)  // 暖灰
+val RarityRare = Color(0xFF6BA3C4)    // 雾蓝（稀有，冷色点缀平衡）
+val RarityEpic = Color(0xFFC17767)    // 暖红棕（史诗，珍贵感）
+
+// ========== 液态玻璃（Liquid Glass）专用色 ==========
+// 苹果液态玻璃的核心是"折射"：边缘因折射而提亮、中心因厚度而加深。
+// 这组颜色用于底部导航的玻璃层，保证在任意背景上都有可读的层次。
+/** 玻璃层中心色（带背景色 8% 混入，形成"厚度"感） */
+val GlassTint = Color(0x14FF9F43)
+
+/** 玻璃上边缘高光（模拟顶光折射，最亮的一条细线） */
+val GlassHighlightTop = Color(0x66FFFFFF)
+
+/** 玻璃下边缘折射光（模拟底部反射环境光，暖调） */
+val GlassHighlightBottom = Color(0x33FFD9A0)
+
+/** 玻璃层内侧柔和阴影（让玻璃"浮"起来，而非平贴） */
+val GlassInnerShadow = Color(0x14000000)
+
+/** 深色主题下的玻璃高光（深色中玻璃更靠"发光边"表达） */
+val GlassHighlightTopDark = Color(0x40FFFFFF)
+val GlassHighlightBottomDark = Color(0x26FFC98A)

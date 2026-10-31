@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -12,10 +13,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,35 +26,36 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -61,6 +64,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.focusguard.app.MainActivity
 import com.focusguard.app.ui.components.CatVideo
+import com.focusguard.app.ui.components.GlassDialog
+import com.focusguard.app.ui.components.GlassDialogActions
+import com.focusguard.app.ui.theme.TimerTextStyle
 
 /**
  * 专注模式全屏页面（v3 · 沉浸视频版）
@@ -103,11 +109,12 @@ fun FocusScreen(
     }
 
     // 全屏沉浸式背景 + 计时器
+    // 注意：根容器不加 systemBarsPadding —— 视频必须铺满到屏幕底部导航栏区域，
+    // 否则底部会露出一条背景色白边（破坏沉浸感）。内容元素各自用 statusBarsPadding 避让。
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding()
     ) {
         // 视频全屏背景：focus 类别 9:16 竖屏，ZOOM 铺满
         val userCat = uiState.userCat
@@ -125,7 +132,8 @@ fun FocusScreen(
             )
         }
 
-        // === 左上角浮动返回按钮 ===
+        // === 左上角返回按钮 ===
+        // 半透明玻璃圆钮 + 白色描边，浮在视频之上；不再是突兀的白色实心圆。
         IconButton(
             onClick = {
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -133,53 +141,35 @@ fun FocusScreen(
             },
             modifier = Modifier
                 .statusBarsPadding()
-                .padding(start = 16.dp, top = 8.dp)
+                .padding(start = 18.dp, top = 10.dp)
                 .align(Alignment.TopStart)
-                .size(40.dp)
-                .background(
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
-                    CircleShape
-                )
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.18f))
+                .border(1.dp, Color.White.copy(alpha = 0.32f), CircleShape)
         ) {
             Icon(
-                imageVector = Icons.Filled.ArrowBack,
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "退出专注",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = Color.White.copy(alpha = 0.92f),
                 modifier = Modifier.size(18.dp)
             )
         }
 
-        // === 天空区域计时器 ===
-        // 放在画面上方 1/3 处，白色大字体 + 轻微阴影，在蓝天背景上清晰可读
-        Box(
+        // === 计时器 ===
+        // 设计感不靠花体字，而靠"环形进度 + 等宽数字"：
+        //  · 环 = 距离下一份猫粮的进度，填充动画本身就是信息
+        //  · 数字用 tabular figures（tnum），跳秒时宽度不变，不会左右抖动
+        //  · 去掉玻璃面板 —— 面板压在天空上会形成难看的双层圆角矩形
+        FocusTimer(
+            elapsedMillis = uiState.elapsedMillis,
+            millisToNextReward = uiState.millisToNextReward,
+            rewardIntervalMs = FocusUiState.REWARD_INTERVAL_MS,
             modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 96.dp)
-                .align(Alignment.TopCenter),
-            contentAlignment = Alignment.TopCenter
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Top
-            ) {
-                Text(
-                    text = formatElapsedTime(uiState.elapsedMillis),
-                    style = TextStyle(
-                        fontSize = 72.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        letterSpacing = 4.sp,
-                        // 轻微阴影提升在明亮天空背景上的可读性
-                        shadow = androidx.compose.ui.graphics.Shadow(
-                            color = Color.Black.copy(alpha = 0.25f),
-                            offset = androidx.compose.ui.geometry.Offset(0f, 4f),
-                            blurRadius = 16f
-                        )
-                    ),
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
+                .statusBarsPadding()
+                .padding(top = 64.dp)
+                .align(Alignment.TopCenter)
+        )
 
         // === 奖励动画覆盖层（顶部滑入横幅）===
         AnimatedVisibility(
@@ -208,6 +198,100 @@ fun FocusScreen(
                 onExit()
             },
             onDismiss = { viewModel.cancelExit() }
+        )
+    }
+}
+
+/**
+ * 专注计时器
+ *
+ * ── 设计意图 ────────────────────────────────────────────────
+ * 用户要求「时间区域有点设计感」，但同时否决了花体字与双层玻璃面板
+ * （压在天空上会形成难看的双层圆角矩形）。最终方案：
+ *
+ *  - **环形进度**：外圈是一道进度环，表示"距离下一份猫粮还剩多少"。
+ *    环本身即信息，不需要额外写「还剩 xx 分钟」这类二级说明文案。
+ *  - **等宽数字**：使用 tabular figures（tnum），秒数跳动时数字宽度不变，
+ *    视觉稳定不抖动 —— 这才是"设计感"的真正来源。
+ *  - **弱对比**：轨道只有 16% 白，进度用暖蜜糖橙，与天空自然融合。
+ */
+@Composable
+private fun FocusTimer(
+    elapsedMillis: Long,
+    millisToNextReward: Long,
+    rewardIntervalMs: Long,
+    modifier: Modifier = Modifier
+) {
+    // 进度：已过的奖励周期比例（0f ~ 1f）
+    val progress = if (rewardIntervalMs > 0) {
+        val elapsedInCycle = rewardIntervalMs - millisToNextReward
+        (elapsedInCycle.toFloat() / rewardIntervalMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(durationMillis = 600, easing = LinearEasing),
+        label = "focus_timer_progress"
+    )
+
+    Box(
+        modifier = modifier.size(148.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        // 进度环
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 3.dp.toPx()
+            val inset = strokeWidth / 2f
+            val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
+
+            // 轨道：极弱的白色，避免在天空中形成生硬描边
+            drawArc(
+                color = Color.White.copy(alpha = 0.16f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+            )
+
+            // 进度：蜜糖橙 → 浅蜜橙渐变（sweepGradient 以 3 点钟为起点，故整体旋转 -90° 对齐 12 点）
+            if (animatedProgress > 0f) {
+                rotate(degrees = -90f, pivot = center) {
+                    drawArc(
+                        brush = Brush.sweepGradient(
+                            listOf(
+                                Color(0xFFFF9F43),
+                                Color(0xFFFFD08A),
+                                Color(0xFFFF9F43)
+                            )
+                        ),
+                        startAngle = 0f,
+                        sweepAngle = 360f * animatedProgress,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = arcSize,
+                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                    )
+                }
+            }
+        }
+
+        // 数字：等宽（tnum）+ 柔和投影，保证在明亮天空上可读
+        Text(
+            text = formatElapsedTime(elapsedMillis),
+            style = TimerTextStyle.copy(
+                fontSize = 40.sp,
+                lineHeight = 46.sp,
+                letterSpacing = 1.sp,
+                color = Color.White,
+                shadow = Shadow(
+                    color = Color(0xFF6B4423).copy(alpha = 0.42f),
+                    offset = Offset(0f, 2f),
+                    blurRadius = 10f
+                )
+            )
         )
     }
 }
@@ -273,47 +357,31 @@ private fun ExitConfirmDialog(
     val intervalMs = FocusUiState.REWARD_INTERVAL_MS
     val minutesLeft = (millisToNextReward / 60000).toInt()
 
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "确定要退出专注吗？",
-                fontWeight = FontWeight.Bold
+        title = "确定要退出专注吗？",
+        actions = {
+            GlassDialogActions(
+                dismissLabel = "退出",
+                confirmLabel = "继续专注",
+                onDismiss = onConfirm,
+                onConfirm = onDismiss
             )
-        },
-        text = {
-            val msg = if (millisToNextReward >= intervalMs) {
-                "本次专注已为猫咪赢得 $rewardsEarned 份猫粮，确定退出吗？"
-            } else if (minutesLeft > 0) {
-                "还有 $minutesLeft 分钟就可以为猫咪获得下一份猫粮奖励，确定要退出吗？"
-            } else {
-                "马上就能为猫咪获得下一份猫粮奖励，再坚持一下！确定要退出吗？"
-            }
-            Text(text = msg)
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onConfirm,
-                modifier = Modifier.height(48.dp),
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            ) {
-                Text("退出", fontWeight = FontWeight.SemiBold)
-            }
-        },
-        dismissButton = {
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier.height(48.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Text("继续专注", color = MaterialTheme.colorScheme.onPrimary)
-            }
         }
-    )
+    ) {
+        val msg = if (millisToNextReward >= intervalMs) {
+            "本次专注已为猫咪赢得 $rewardsEarned 份猫粮，确定退出吗？"
+        } else if (minutesLeft > 0) {
+            "还有 $minutesLeft 分钟就可以为猫咪获得下一份猫粮奖励，确定要退出吗？"
+        } else {
+            "马上就能为猫咪获得下一份猫粮奖励，再坚持一下！确定要退出吗？"
+        }
+        Text(
+            text = msg,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 /**

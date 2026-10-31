@@ -10,7 +10,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,9 +27,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,6 +58,8 @@ import androidx.navigation.compose.rememberNavController
 import com.focusguard.app.MainActivity
 import com.focusguard.app.ui.apps.AppsScreen
 import com.focusguard.app.ui.cat.CatScreen
+import com.focusguard.app.ui.components.SimpleNavEntry
+import com.focusguard.app.ui.components.SimpleNavigationBar
 import com.focusguard.app.ui.cat.CatSelectionScreen
 import com.focusguard.app.ui.focus.FocusScreen
 import com.focusguard.app.ui.settings.SettingsScreen
@@ -93,6 +94,11 @@ private val bottomNavItems = listOf(
     BottomNavItem.Stats,
     BottomNavItem.Settings
 )
+
+/** 底部导航栏渲染用的数据（与路由表一一对应） */
+private val bottomNavEntries = bottomNavItems.map {
+    SimpleNavEntry(route = it.route, label = it.title, icon = it.icon)
+}
 
 /**
  * 主界面入口
@@ -141,12 +147,6 @@ fun MainScreen(
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "专注每一刻，陪伴每一天",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -227,76 +227,22 @@ private fun MainTabScreen() {
         bottomBar = {
             // 全屏页（专注模式）不显示底部导航，避免用户切到其他 Tab 导致 bug
             if (!isFullScreen) {
-                // 在 @Composable 上下文中提取颜色，供 drawBehind（非 Composable）使用
-                val borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 0.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .drawBehind {
-                            // Apple-style subtle top border instead of shadow
-                            drawLine(
-                                color = borderColor,
-                                start = Offset(0f, 0f),
-                                end = Offset(size.width, 0f),
-                                strokeWidth = 0.5.dp.toPx()
-                            )
-                        }
-                ) {
-                    bottomNavItems.forEach { item ->
-                        val isSelected = currentDestination?.hierarchy?.any { it.route == item.route } == true
-                        // 选中项弹性缩放动画
-                        val iconScale by animateFloatAsState(
-                            targetValue = if (isSelected) 1f else 1f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessMedium
-                            ),
-                            label = "nav_icon_scale"
-                        )
-                        NavigationBarItem(
-                            selected = isSelected,
-                            onClick = {
-                                // Tab 切换是高频轻操作，按项目触觉规范使用 TextHandleMove（轻震）
-                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                navigateToTab(item.route)
-                            },
-                            icon = {
-                                Icon(
-                                    imageVector = item.icon,
-                                    contentDescription = item.title,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .scale(iconScale)
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = item.title,
-                                    style = if (isSelected) {
-                                        MaterialTheme.typography.labelMedium
-                                    } else {
-                                        MaterialTheme.typography.labelSmall
-                                    },
-                                    fontWeight = if (isSelected) {
-                                        FontWeight.Medium
-                                    } else {
-                                        FontWeight.Normal
-                                    }
-                                )
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                indicatorColor = Color.Transparent
-                            )
-                        )
+                // 简洁底栏：自绘（非 M3 NavigationBar）
+                // M3 的 NavigationBar 会把底部系统手势 inset 挤进固定高度，
+                // 导致图标上方留白被压没、选中胶囊被裁切，故改为自绘以精确控制留白。
+                // 尝试过液态玻璃（多层 Canvas 模拟折射），在纯色背景上只呈现"脏边缘"，
+                // 反而破坏了简洁感，故回退到此方案。
+                SimpleNavigationBar(
+                    items = bottomNavEntries,
+                    selectedRoute = currentDestination?.hierarchy
+                        ?.firstOrNull { dest -> bottomNavEntries.any { it.route == dest.route } }
+                        ?.route,
+                    onSelect = { route ->
+                        // Tab 切换是高频轻操作，按项目触觉规范使用 TextHandleMove（轻震）
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        navigateToTab(route)
                     }
-                }
+                )
             }
         }
     ) { innerPadding ->

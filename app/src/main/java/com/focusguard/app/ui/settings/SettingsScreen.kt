@@ -74,6 +74,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.focusguard.app.BuildConfig
 import com.focusguard.app.detection.AppDetectionManager
+import com.focusguard.app.ui.components.SoftTextField
 import com.focusguard.app.util.PermissionHelper
 import com.focusguard.app.util.RomUtils
 import java.io.File
@@ -507,17 +508,11 @@ private fun RecurringReminderGroup(
         ) {
             Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                 Spacer(modifier = Modifier.size(8.dp))
-                Text(
-                    text = "再次提醒间隔（5-120 分钟）",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = dimColor,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedTextField(
+                    SoftTextField(
                         value = inputText,
                         onValueChange = { text ->
                             // 只允许数字
@@ -535,32 +530,26 @@ private fun RecurringReminderGroup(
                                 inputError = false
                             }
                         },
+                        label = "间隔分钟数",
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        isError = inputError,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
-                        ),
-                        supportingText = {
-                            if (inputError) {
-                                Text(
-                                    text = "请输入 5-120 之间的数字",
-                                    color = com.focusguard.app.ui.theme.ErrorText
-                                )
-                            } else {
-                                Text(text = "范围 5-120 分钟，0 = 关闭")
-                            }
-                        },
-                        trailingIcon = {
-                            Text(
-                                text = "分钟",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = dimColor
-                            )
-                        }
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "分钟",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = dimColor
                     )
                 }
+                Spacer(modifier = Modifier.size(6.dp))
+                Text(
+                    text = if (inputError) "请输入 5-120 之间的数字" else "5-120 分钟 · 0 = 关闭",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (inputError) com.focusguard.app.ui.theme.ErrorText else dimColor
+                )
                 Spacer(modifier = Modifier.size(12.dp))
             }
         }
@@ -661,7 +650,7 @@ private fun KeepAliveGuideCard() {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "无障碍服务已被系统关闭，点击这里重新开启守护",
+                            text = "无障碍服务已被系统关闭，点击重新开启守护",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
@@ -839,13 +828,5 @@ private fun AboutSection() {
         )
 
         Spacer(modifier = Modifier.size(16.dp))
-
-        // 版权/致谢
-        Text(
-            text = "用温暖守护你的专注",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            textAlign = TextAlign.Center
-        )
     }
 }

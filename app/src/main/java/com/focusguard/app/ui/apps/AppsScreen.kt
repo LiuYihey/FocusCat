@@ -75,6 +75,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.focusguard.app.ui.components.PermissionCard
+import com.focusguard.app.ui.components.PrimaryButton
+import com.focusguard.app.ui.components.SoftTextField
 import com.focusguard.app.ui.components.pressScale
 import com.focusguard.app.ui.theme.Success
 import com.focusguard.app.ui.theme.Warning
@@ -182,7 +185,7 @@ fun AppsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
+                .padding(start = 16.dp, end = 16.dp)
                 .padding(top = 16.dp, bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -247,38 +250,16 @@ fun AppsScreen(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         fontWeight = FontWeight.SemiBold
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "把容易让你分心的应用加进来\n每次打开都会先弹反思问答",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 22.sp
-                    )
                     Spacer(modifier = Modifier.height(32.dp))
-                    androidx.compose.material3.Button(
+                    PrimaryButton(
+                        text = "添加约束应用",
                         onClick = {
                             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.showDialog()
                         },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "添加约束应用",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                        height = 48.dp,
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
                 }
             } else {
                 // 已拦截应用列表 - iOS 风格分组列表
@@ -361,19 +342,15 @@ fun AppsScreen(
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
-                // 搜索框 - iOS 风格
-                OutlinedTextField(
+                // 搜索框 - 高定版（聚焦禁描边 + 双环阴影）
+                SoftTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
+                    label = "搜索应用",
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 12.dp),
-                    placeholder = {
-                        Text(
-                            "搜索应用",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                    },
+                    singleLine = true,
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Filled.Search,
@@ -381,18 +358,7 @@ fun AppsScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
                         )
-                    },
-                    textStyle = MaterialTheme.typography.bodyLarge,
-                    shape = RoundedCornerShape(14.dp),
-                    singleLine = true,
-                    maxLines = 1,
-                    minLines = 1,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    )
+                    }
                 )
 
                 if (uiState.isLoading) {
@@ -466,7 +432,7 @@ private fun GuardStatusCard(
         else -> "守护未就绪"
     }
     val statusDesc = when {
-        isReady -> "正在保护你的专注时间"
+        isReady -> null
         !isProtectionEnabled -> "开启后才会拦截约束应用"
         else -> "请按下方诊断完成必要设置"
     }
@@ -502,11 +468,13 @@ private fun GuardStatusCard(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        text = statusDesc,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (statusDesc != null) {
+                        Text(
+                            text = statusDesc,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
             Switch(
@@ -626,15 +594,6 @@ private fun GuardDiagnosticCard(
                         accessibilityEnabledNotRunning = accessibilityEnabledNotRunning
                     )
                 }
-                // 提示用户：授权后返回本页会自动检测
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "提示：在系统设置中授权后返回本页，状态会自动更新",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(start = 28.dp)
-                )
             }
         }
 
@@ -670,34 +629,18 @@ private fun GuardDiagnosticCard(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "服务可能在退出应用后被系统暂停，需要在设置中关闭再重新开启即可恢复",
+                        text = "到系统设置中关闭再开启无障碍服务即可恢复",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    androidx.compose.material3.Button(
+                    PrimaryButton(
+                        text = "去重启无障碍服务",
                         onClick = { onRequestPermission(GuardDiagnosticItem.ACCESSIBILITY) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = Warning
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Refresh,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "去重启无障碍服务",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
-                    }
+                        height = 48.dp,
+                        containerColor = Warning
+                    )
                 }
             }
         }

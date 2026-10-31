@@ -1,5 +1,9 @@
 package com.focusguard.app.ui.settings
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +58,10 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
+import com.focusguard.app.ui.components.CollapsibleSection
+import com.focusguard.app.ui.components.GlassDialog
+import com.focusguard.app.ui.components.GlassDialogActions
+import com.focusguard.app.ui.components.SoftTextField
 
 /**
  * 反思问题管理界面
@@ -119,12 +128,6 @@ fun ReflectionQuestionsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "这些问题会在你打开约束应用时弹出",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
@@ -277,55 +280,66 @@ private fun EditQuestionDialog(
         )
     }
 
-    AlertDialog(
+    GlassDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(if (editingQuestion == null) "添加问题" else "编辑问题")
-        },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(
-                    value = questionText,
-                    onValueChange = { questionText = it },
-                    label = { Text("问题内容") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = false,
-                    minLines = 2
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+        title = if (editingQuestion == null) "添加问题" else "编辑问题",
+        actions = {
+            GlassDialogActions(
+                dismissLabel = "取消",
+                confirmLabel = "保存",
+                onDismiss = onDismiss,
+                onConfirm = { onSave(questionText, placeholder, questionType, options) }
+            )
+        }
+    ) {
+        Column {
+            // 问题内容
+            SoftTextField(
+                value = questionText,
+                onValueChange = { questionText = it },
+                label = "问题内容",
+                placeholder = "你进入这个 app 是来做什么的？",
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+                minLines = 2
+            )
+            Spacer(modifier = Modifier.height(18.dp))
 
-                // 题型选择
-                Text(
-                    text = "题型",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        ReflectionQuestionEntity.TYPE_CHOICE to "选择题",
-                        ReflectionQuestionEntity.TYPE_DURATION to "使用时长",
-                        ReflectionQuestionEntity.TYPE_OPEN to "开放问答"
-                    ).forEach { (type, label) ->
-                        FilterChip(
-                            selected = questionType == type,
-                            onClick = { questionType = type },
-                            label = { Text(label, fontSize = 13.sp) }
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-
-                if (questionType == ReflectionQuestionEntity.TYPE_OPEN) {
-                    OutlinedTextField(
-                        value = placeholder,
-                        onValueChange = { placeholder = it },
-                        label = { Text("输入框提示（可选）") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+            // 题型选择：自定义胶囊按钮组，替代原生 FilterChip 的方正描边
+            Text(
+                text = "题型",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    ReflectionQuestionEntity.TYPE_CHOICE to "选择题",
+                    ReflectionQuestionEntity.TYPE_DURATION to "使用时长",
+                    ReflectionQuestionEntity.TYPE_OPEN to "开放问答"
+                ).forEach { (type, label) ->
+                    TypeSegmentChip(
+                        label = label,
+                        selected = questionType == type,
+                        onClick = { questionType = type }
                     )
-                } else {
-                    // 选项编辑：每行一个输入框 + 删除按钮
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Grid 0fr→1fr 折叠：切换题型时，内容区高度平滑过渡
+            CollapsibleSection(expanded = questionType == ReflectionQuestionEntity.TYPE_OPEN) {
+                SoftTextField(
+                    value = placeholder,
+                    onValueChange = { placeholder = it },
+                    label = "输入框提示（可选）",
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+
+            CollapsibleSection(expanded = questionType != ReflectionQuestionEntity.TYPE_OPEN) {
+                Column {
                     Text(
                         text = if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
                             "时长选项（数字为分钟数，如 15 或 1 小时）"
@@ -335,31 +349,27 @@ private fun EditQuestionDialog(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     options.forEachIndexed { index, option ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            OutlinedTextField(
+                            SoftTextField(
                                 value = option,
                                 onValueChange = { newValue ->
                                     options = options.toMutableList().also {
                                         it[index] = newValue
                                     }
                                 },
+                                label = "选项 ${index + 1}",
+                                placeholder = if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
+                                    "如 15 分钟"
+                                } else {
+                                    "选项文案"
+                                },
                                 modifier = Modifier.weight(1f),
-                                singleLine = true,
-                                placeholder = {
-                                    Text(
-                                        text = if (questionType == ReflectionQuestionEntity.TYPE_DURATION) {
-                                            "如 15 分钟"
-                                        } else {
-                                            "选项文案"
-                                        },
-                                        fontSize = 13.sp
-                                    )
-                                }
+                                singleLine = true
                             )
                             IconButton(
                                 onClick = {
@@ -367,7 +377,8 @@ private fun EditQuestionDialog(
                                         it.removeAt(index)
                                     }
                                 },
-                                enabled = options.size > 2
+                                enabled = options.size > 2,
+                                modifier = Modifier.padding(start = 4.dp)
                             ) {
                                 Icon(
                                     Icons.Filled.Delete,
@@ -376,25 +387,57 @@ private fun EditQuestionDialog(
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    TextButton(onClick = {
-                        options = options + "新选项"
-                    }) {
-                        Text("+ 添加选项", fontSize = 13.sp)
-                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "+ 添加选项",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { options = options + "新选项" }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(questionText, placeholder, questionType, options) }) {
-                Text("保存")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
         }
+
+    }
+}
+
+/**
+ * 题型分段选择器（自定义胶囊按钮）
+ *
+ * 替代原生 FilterChip：原生版本有方正描边 + 硬边，与整体圆润调性不符。
+ * 这里用胶囊形状 + 主色填充表达选中态，视觉更轻。
+ */
+@Composable
+private fun TypeSegmentChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val bg by animateColorAsState(
+        targetValue = if (selected) scheme.primary else scheme.surfaceVariant,
+        animationSpec = tween(200),
+        label = "chip_bg"
+    )
+    val fg by animateColorAsState(
+        targetValue = if (selected) scheme.onPrimary else scheme.onSurfaceVariant,
+        animationSpec = tween(200),
+        label = "chip_fg"
+    )
+
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelMedium,
+        color = fg,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 9.dp)
     )
 }

@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.focusguard.app.ui.theme.Success
+import com.focusguard.app.ui.components.PrimaryButton
 import com.focusguard.app.ui.theme.Warning
 
 /**
@@ -100,25 +101,16 @@ fun PermissionCard(
             )
             if (!isGranted) {
                 Spacer(modifier = Modifier.size(14.dp))
-                Button(
+                PrimaryButton(
+                    text = "去授权",
                     onClick = {
                         hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onRequestPermission()
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Text(
-                        text = "去授权",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
+                    enabled = true,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    height = 48.dp
+                )
             }
         }
     }
