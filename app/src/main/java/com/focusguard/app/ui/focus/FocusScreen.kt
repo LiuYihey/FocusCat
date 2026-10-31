@@ -24,8 +24,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -63,8 +63,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.util.UnstableApi
@@ -75,7 +77,7 @@ import com.focusguard.app.ui.components.GlassDialog
 import com.focusguard.app.ui.components.GlassDialogActions
 import com.focusguard.app.ui.theme.CuteChineseFont
 import com.focusguard.app.ui.theme.CuteRewardTextStyle
-import com.focusguard.app.ui.theme.Primary
+import com.focusguard.app.ui.theme.PrimarySoft
 import com.focusguard.app.ui.theme.TimerNumberFont
 import com.focusguard.app.ui.theme.TimerTextStyle
 
@@ -274,6 +276,10 @@ private fun FocusTimer(
             }
         }
 
+        // 计时数字下方的空白（来自 Baloo 2 巨大的下伸部）要靠负偏移抵消，
+        // 偏移量与计时字号成正比，并按 px 计算，这样跟随系统字体缩放。
+        val timerFontPx = with(LocalDensity.current) { fittedFontSize.toPx() }
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(horizontal = 24.dp)
@@ -282,7 +288,9 @@ private fun FocusTimer(
                 text = timeText,
                 style = baseStyle.copy(
                     fontSize = fittedFontSize,
-                    lineHeight = fittedFontSize * 1.16f,
+                    // 行高贴近字号：多余的 leading 会在数字下方留白，
+                    // 让下方那行猫粮计数显得离计时数字很远，这里压缩掉。
+                    lineHeight = fittedFontSize * 1.05f,
                     letterSpacing = (fittedFontSize.value * 0.02f).sp
                 ),
                 maxLines = 1,
@@ -290,20 +298,25 @@ private fun FocusTimer(
                 textAlign = TextAlign.Center
             )
 
-            // 猫粮计数：站酷快乐体 + 蜜糖橙，一句话说明这只猫攒了多少猫粮
-            Spacer(modifier = Modifier.height(10.dp))
+            // 猫粮计数：站酷快乐体 + 浅蜜橙，一句话说明这只猫攒了多少猫粮
+            // 紧贴计时数字下方：Baloo 2 的下伸部（descent 0.524em）会在数字下方
+            // 留出一大片空白，所以这里用与计时字号成正比的负偏移把两行真正贴在一起。
             Text(
                 text = buildCuteRewardText(catName, foodCount),
                 style = CuteRewardTextStyle.copy(
-                    color = Primary,
+                    color = PrimarySoft,
+                    lineHeight = 22.sp,
                     shadow = Shadow(
-                        color = Color(0xFF7A3E12).copy(alpha = 0.38f),
+                        color = Color(0xFF7A3E12).copy(alpha = 0.34f),
                         offset = Offset(0f, 2f),
                         blurRadius = 8f
                     )
                 ),
                 textAlign = TextAlign.Center,
-                maxLines = 2
+                maxLines = 2,
+                modifier = Modifier.offset {
+                    IntOffset(0, -(timerFontPx * 0.45f).roundToInt())
+                }
             )
         }
     }
@@ -315,13 +328,27 @@ private fun FocusTimer(
  * 按字符集分派字体：
  *  - 汉字 → 站酷快乐体（手绘活泼感）
  *  - 数字与拉丁字母 → Baloo 2 圆体（圆润，tnum 等宽）
- *  两者都是圆润手绘风，混排不突兀。
+ * 两者都是圆润手绘风，混排不突兀。
+ *
+ * 数字两侧额外加宽间距 + 略微放大字号，让"份数"从整句里独立出来、
+ * 更容易被一眼读到。
  */
 private fun buildCuteRewardText(catName: String, foodCount: Int): AnnotatedString =
     buildAnnotatedString {
         appendCute(catName)
         appendCute("已获得")
-        appendCute(foodCount.toString())
+        // 数字两侧各留两个空格，让份数从整句里独立出来
+        appendCute("  ")
+        withStyle(
+            SpanStyle(
+                fontFamily = TimerNumberFont,
+                fontWeight = FontWeight.Bold,
+                fontSize = 21.sp
+            )
+        ) {
+            append(foodCount.toString())
+        }
+        appendCute("  ")
         appendCute("份猫粮")
     }
 

@@ -26,6 +26,9 @@ import androidx.compose.ui.graphics.Color
 val Primary = Color(0xFFFF9F43)
 val PrimaryLight = Color(0xFFFFB76B)
 val PrimaryDark = Color(0xFFE8852A)
+// 浅蜜橙：用于彩色背景（天空/视频）上的次级强调文字，
+// 比 Primary 更柔和浅淡，不会与白色计时数字抢视觉重心
+val PrimarySoft = Color(0xFFFFCC8C)
 
 // ========== 强调色 - 浅蜜橙（同色系延伸） ==========
 val Accent = Color(0xFFFFB74D)
