@@ -13,16 +13,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -30,12 +33,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -54,8 +53,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -157,30 +160,31 @@ fun FocusScreen(
         }
 
         // === 计时器 ===
-        // 设计感不靠花体字，而靠"环形进度 + 等宽数字"：
-        //  · 环 = 距离下一份猫粮的进度，填充动画本身就是信息
-        //  · 数字用 tabular figures（tnum），跳秒时宽度不变，不会左右抖动
-        //  · 去掉玻璃面板 —— 面板压在天空上会形成难看的双层圆角矩形
+        // 圆润数字（Baloo 2）+ 自动缩放字号保证单行 + 下方细进度条
+        // 不用圆环：圆环容易被误读成 24 小时时钟表盘
         FocusTimer(
             elapsedMillis = uiState.elapsedMillis,
             millisToNextReward = uiState.millisToNextReward,
             rewardIntervalMs = FocusUiState.REWARD_INTERVAL_MS,
             modifier = Modifier
                 .statusBarsPadding()
-                .padding(top = 64.dp)
+                .padding(top = 56.dp)
                 .align(Alignment.TopCenter)
         )
 
-        // === 奖励动画覆盖层（顶部滑入横幅）===
+        // === 奖励动画覆盖层（底部横幅）===
+        // 放在底部而不是顶部：顶部被左上角返回按钮和计时器占据，
+        // 横幅滑入会盖住返回按钮，导致按钮在该几秒内点不到。
+        // 底部是 Toast/Snackbar 的惯例位置，也不会遮挡画面主体。
         AnimatedVisibility(
             visible = uiState.showRewardAnimation,
             enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.8f, animationSpec = tween(400)),
             exit = fadeOut(tween(600)) + scaleOut(targetScale = 0.8f, animationSpec = tween(600)),
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 24.dp)
         ) {
             RewardBannerOverlay(
                 foodName = uiState.lastReward?.displayName ?: "猫粮"
@@ -206,14 +210,17 @@ fun FocusScreen(
  * 专注计时器
  *
  * ── 设计意图 ────────────────────────────────────────────────
- * 用户要求「时间区域有点设计感」，但同时否决了花体字与双层玻璃面板
- * （压在天空上会形成难看的双层圆角矩形）。最终方案：
- *
- *  - **环形进度**：外圈是一道进度环，表示"距离下一份猫粮还剩多少"。
- *    环本身即信息，不需要额外写「还剩 xx 分钟」这类二级说明文案。
- *  - **等宽数字**：使用 tabular figures（tnum），秒数跳动时数字宽度不变，
- *    视觉稳定不抖动 —— 这才是"设计感"的真正来源。
- *  - **弱对比**：轨道只有 16% 白，进度用暖蜜糖橙，与天空自然融合。
+ *  - **不要进度圈**：外圈圆环会被误读成 24 小时时钟表盘，
+ *    且在明亮天空上留下一圈生硬描边。改为纯文字 + 下方细进度条。
+ *  - **圆润数字**：使用 Baloo 2 圆体（`TimerTextStyle`），
+ *    字符本身有柔和的圆弧收笔，比系统黑体更有"可爱"感。
+ *    该字体**只作用于计时数字**，不进入全局 Typography。
+ *  - **绝不分行**：时长超过 1 小时后格式从 `MM:SS` 变成 `HH:MM:SS`，
+ *    字符数从 5 变 8，固定字号会把数字挤到两行。用
+ *    `BoxWithConstraints` + 文本测量，按可用宽度自动缩放字号，
+ *    保证任何时长都是单行。
+ *  - **不抖动的秒数**：字体自带 tnum（tabular figures），
+ *    每个数字占位相同，跳秒时整串宽度不变。
  */
 @Composable
 private fun FocusTimer(
@@ -222,7 +229,9 @@ private fun FocusTimer(
     rewardIntervalMs: Long,
     modifier: Modifier = Modifier
 ) {
-    // 进度：已过的奖励周期比例（0f ~ 1f）
+    val timeText = formatElapsedTime(elapsedMillis)
+
+    // 进度：已过的奖励周期比例（0f ~ 1f），以细进度条呈现
     val progress = if (rewardIntervalMs > 0) {
         val elapsedInCycle = rewardIntervalMs - millisToNextReward
         (elapsedInCycle.toFloat() / rewardIntervalMs.toFloat()).coerceIn(0f, 1f)
@@ -235,70 +244,82 @@ private fun FocusTimer(
         label = "focus_timer_progress"
     )
 
-    Box(
-        modifier = modifier.size(148.dp),
-        contentAlignment = Alignment.Center
+    BoxWithConstraints(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.TopCenter
     ) {
-        // 进度环
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidth = 3.dp.toPx()
-            val inset = strokeWidth / 2f
-            val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
-
-            // 轨道：极弱的白色，避免在天空中形成生硬描边
-            drawArc(
-                color = Color.White.copy(alpha = 0.16f),
-                startAngle = -90f,
-                sweepAngle = 360f,
-                useCenter = false,
-                topLeft = Offset(inset, inset),
-                size = arcSize,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        val baseStyle = TimerTextStyle.copy(
+            color = Color.White,
+            shadow = Shadow(
+                color = Color(0xFF6B4423).copy(alpha = 0.42f),
+                offset = Offset(0f, 2f),
+                blurRadius = 10f
             )
-
-            // 进度：蜜糖橙 → 浅蜜橙渐变（sweepGradient 以 3 点钟为起点，故整体旋转 -90° 对齐 12 点）
-            if (animatedProgress > 0f) {
-                rotate(degrees = -90f, pivot = center) {
-                    drawArc(
-                        brush = Brush.sweepGradient(
-                            listOf(
-                                Color(0xFFFF9F43),
-                                Color(0xFFFFD08A),
-                                Color(0xFFFF9F43)
-                            )
-                        ),
-                        startAngle = 0f,
-                        sweepAngle = 360f * animatedProgress,
-                        useCenter = false,
-                        topLeft = Offset(inset, inset),
-                        size = arcSize,
-                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                    )
-                }
+        )
+        // 量出当前字符串在基准字号下的宽度，再按可用宽度反推能单行放下的字号
+        val textMeasurer = rememberTextMeasurer()
+        val estimatedWidthPx = remember(timeText) {
+            textMeasurer.measure(
+                text = timeText,
+                style = baseStyle,
+                constraints = Constraints()
+            ).size.width
+        }
+        val availableWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
+        val fittedFontSize = remember(estimatedWidthPx, availableWidthPx) {
+            if (estimatedWidthPx <= 0f || availableWidthPx <= 0f) {
+                baseStyle.fontSize
+            } else {
+                // 留 12% 余量，避免数字贴边
+                val ratio = (availableWidthPx * 0.88f) / estimatedWidthPx
+                (baseStyle.fontSize.value * ratio).coerceIn(26f, baseStyle.fontSize.value).sp
             }
         }
 
-        // 数字：等宽（tnum）+ 柔和投影，保证在明亮天空上可读
-        Text(
-            text = formatElapsedTime(elapsedMillis),
-            style = TimerTextStyle.copy(
-                fontSize = 40.sp,
-                lineHeight = 46.sp,
-                letterSpacing = 1.sp,
-                color = Color.White,
-                shadow = Shadow(
-                    color = Color(0xFF6B4423).copy(alpha = 0.42f),
-                    offset = Offset(0f, 2f),
-                    blurRadius = 10f
-                )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 24.dp)
+        ) {
+            Text(
+                text = timeText,
+                style = baseStyle.copy(
+                    fontSize = fittedFontSize,
+                    lineHeight = fittedFontSize * 1.16f,
+                    letterSpacing = (fittedFontSize.value * 0.02f).sp
+                ),
+                maxLines = 1,
+                softWrap = false,
+                textAlign = TextAlign.Center
             )
-        )
+
+            // 细进度条：替代原先的圆环，指示距离下一份猫粮的进度
+            Spacer(modifier = Modifier.height(14.dp))
+            Box(
+                modifier = Modifier
+                    .width(132.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.22f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(animatedProgress.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(50))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color(0xFFFF9F43), Color(0xFFFFD08A))
+                            )
+                        )
+                )
+            }
+        }
     }
 }
 
 /**
  * Apple 风格奖励横幅通知
- * 从顶部滑入的细长横幅，带脉冲动画
+ * 底部浮出的细长横幅，带脉冲动画
  */
 @Composable
 private fun RewardBannerOverlay(foodName: String) {
@@ -386,9 +407,12 @@ private fun ExitConfirmDialog(
 
 /**
  * 格式化已专注时长为 HH:MM:SS
+ *
+ * millis 可能为负（系统时间被往回调），此时钳制为 0，
+ * 否则会显示成 "-2:-37" 这种负数时间。
  */
 private fun formatElapsedTime(millis: Long): String {
-    val totalSeconds = millis / 1000
+    val totalSeconds = (millis / 1000).coerceAtLeast(0L)
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
     val seconds = totalSeconds % 60

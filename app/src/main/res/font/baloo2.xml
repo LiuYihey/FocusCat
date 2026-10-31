@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Baloo 2 —— 仅用于专注页计时数字（圆润可爱）
+  注意：只绑定这一个字重，Text 中若请求其他字重会回落到系统字体，
+  因此调用处必须显式指定 FontWeight.Bold。
+-->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android">
+    <font
+        android:font="@font/baloo2_bold"
+        android:fontStyle="normal"
+        android:fontWeight="700" />
+</font-family>
