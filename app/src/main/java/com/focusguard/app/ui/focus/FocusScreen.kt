@@ -55,8 +55,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -69,7 +73,10 @@ import com.focusguard.app.MainActivity
 import com.focusguard.app.ui.components.CatVideo
 import com.focusguard.app.ui.components.GlassDialog
 import com.focusguard.app.ui.components.GlassDialogActions
-import com.focusguard.app.ui.components.RunningCatProgress
+import com.focusguard.app.ui.theme.CuteChineseFont
+import com.focusguard.app.ui.theme.CuteRewardTextStyle
+import com.focusguard.app.ui.theme.Primary
+import com.focusguard.app.ui.theme.TimerNumberFont
 import com.focusguard.app.ui.theme.TimerTextStyle
 
 /**
@@ -161,12 +168,13 @@ fun FocusScreen(
         }
 
         // === 计时器 ===
-        // 圆润数字（Baloo 2）+ 自动缩放字号保证单行 + 下方细进度条
-        // 不用圆环：圆环容易被误读成 24 小时时钟表盘
+        // 圆润数字（Baloo 2）+ 自动缩放字号保证单行，下方一句猫粮计数
+        // 猫粮数取当前激活猫的累计投喂次数：每投喂一次消耗一份猫粮，
+        // 所以这个计数就是「这只猫一共拿到过多少份猫粮」，且只增不减。
         FocusTimer(
             elapsedMillis = uiState.elapsedMillis,
-            millisToNextReward = uiState.millisToNextReward,
-            rewardIntervalMs = FocusUiState.REWARD_INTERVAL_MS,
+            catName = uiState.userCat?.name ?: "猫咪",
+            foodCount = uiState.userCat?.totalFeedCount ?: 0,
             modifier = Modifier
                 .statusBarsPadding()
                 .padding(top = 56.dp)
@@ -212,7 +220,9 @@ fun FocusScreen(
  *
  * ── 设计意图 ────────────────────────────────────────────────
  *  - **不要进度圈**：外圈圆环会被误读成 24 小时时钟表盘，
- *    且在明亮天空上留下一圈生硬描边。改为纯文字 + 下方细进度条。
+ *    且在明亮天空上留下一圈生硬描边。
+ *  - **不要动画进度条**：跑动的小猫动画与整体风格不搭，
+ *    已整体移除。进度信息改由下方一句文案承载。
  *  - **圆润数字**：使用 Baloo 2 圆体（`TimerTextStyle`），
  *    字符本身有柔和的圆弧收笔，比系统黑体更有"可爱"感。
  *    该字体**只作用于计时数字**，不进入全局 Typography。
@@ -226,24 +236,11 @@ fun FocusScreen(
 @Composable
 private fun FocusTimer(
     elapsedMillis: Long,
-    millisToNextReward: Long,
-    rewardIntervalMs: Long,
+    catName: String,
+    foodCount: Int,
     modifier: Modifier = Modifier
 ) {
     val timeText = formatElapsedTime(elapsedMillis)
-
-    // 进度：已过的奖励周期比例（0f ~ 1f），以细进度条呈现
-    val progress = if (rewardIntervalMs > 0) {
-        val elapsedInCycle = rewardIntervalMs - millisToNextReward
-        (elapsedInCycle.toFloat() / rewardIntervalMs.toFloat()).coerceIn(0f, 1f)
-    } else {
-        0f
-    }
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress,
-        animationSpec = tween(durationMillis = 600, easing = LinearEasing),
-        label = "focus_timer_progress"
-    )
 
     BoxWithConstraints(
         modifier = modifier.fillMaxWidth(),
@@ -293,16 +290,66 @@ private fun FocusTimer(
                 textAlign = TextAlign.Center
             )
 
-            // 小猫奔跑进度：猫沿轨道朝猫粮碗跑，位置 = 奖励进度
-            Spacer(modifier = Modifier.height(12.dp))
-            RunningCatProgress(
-                progress = animatedProgress.coerceIn(0f, 1f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp)
+            // 猫粮计数：站酷快乐体 + 蜜糖橙，一句话说明这只猫攒了多少猫粮
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = buildCuteRewardText(catName, foodCount),
+                style = CuteRewardTextStyle.copy(
+                    color = Primary,
+                    shadow = Shadow(
+                        color = Color(0xFF7A3E12).copy(alpha = 0.38f),
+                        offset = Offset(0f, 2f),
+                        blurRadius = 8f
+                    )
+                ),
+                textAlign = TextAlign.Center,
+                maxLines = 2
             )
         }
     }
+}
+
+/**
+ * 构造「XX已获得 N 份猫粮」文案
+ *
+ * 按字符集分派字体：
+ *  - 汉字 → 站酷快乐体（手绘活泼感）
+ *  - 数字与拉丁字母 → Baloo 2 圆体（圆润，tnum 等宽）
+ *  两者都是圆润手绘风，混排不突兀。
+ */
+private fun buildCuteRewardText(catName: String, foodCount: Int): AnnotatedString =
+    buildAnnotatedString {
+        appendCute(catName)
+        appendCute("已获得")
+        appendCute(foodCount.toString())
+        appendCute("份猫粮")
+    }
+
+/** 按字符集分段追加：汉字走 ZCOOL，其余走 Baloo 2 */
+private fun AnnotatedString.Builder.appendCute(text: String) {
+    var buffer = StringBuilder()
+    var bufferIsCjk: Boolean? = null
+    fun flush() {
+        val s = buffer.toString()
+        if (s.isNotEmpty()) {
+            withStyle(
+                SpanStyle(
+                    fontFamily = if (bufferIsCjk == true) CuteChineseFont else TimerNumberFont,
+                    fontWeight = if (bufferIsCjk == true) FontWeight.Normal else FontWeight.Bold
+                )
+            ) {
+                append(s)
+            }
+        }
+        buffer = StringBuilder()
+    }
+    text.forEach { ch ->
+        val isCjk = ch.code in 0x4E00..0x9FFF || ch.code in 0x3000..0x303F || ch.code in 0xFF00..0xFFEF
+        if (bufferIsCjk != null && bufferIsCjk != isCjk) flush()
+        bufferIsCjk = isCjk
+        buffer.append(ch)
+    }
+    flush()
 }
 
 /**

@@ -191,3 +191,43 @@ val TimerTextStyle = TextStyle(
     letterSpacing = 1.sp,
     fontFeatureSettings = "tnum"
 )
+
+/**
+ * 可爱圆体字族（Baloo 2 + 站酷快乐体回退链）
+ *
+ * 只用于专注页那一句「XX已获得 N 份猫粮」——
+ * 这是全 App 唯一一处需要"活泼可爱"气质的中文，
+ * 所以**不进入全局 Typography**，只在此处按需引用。
+ *
+ * 字体回退链的作用：
+ *  - 数字与拉丁字母 → Baloo 2（圆润、tnum 等宽，跳秒不抖）
+ *  - 中日韩汉字 → 站酷快乐体（手绘活泼感）
+ * 两种字体都是圆润手绘风，混排不突兀。
+ */
+val CuteTextFont = FontFamily(
+    Font(R.font.baloo2_bold, weight = FontWeight.Bold),
+    Font(R.font.zcool_kuaile, weight = FontWeight.Normal)
+)
+
+/**
+ * 站酷快乐体（中文手绘活泼风）
+ *
+ * 供需要逐字分派字体的场景使用（见 FocusScreen 的猫粮计数文案）：
+ * 汉字走这个，数字/拉丁字母走 Baloo 2。
+ */
+val CuteChineseFont = FontFamily(
+    Font(R.font.zcool_kuaile, weight = FontWeight.Normal)
+)
+
+/**
+ * 猫粮计数文案样式（专注页计时器下方）
+ *
+ * 蜜糖橙，与背景天空形成暖色对比。
+ */
+val CuteRewardTextStyle = TextStyle(
+    fontFamily = CuteTextFont,
+    fontWeight = FontWeight.Normal,
+    fontSize = 18.sp,
+    lineHeight = 26.sp,
+    letterSpacing = 0.5.sp
+)
