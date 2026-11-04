@@ -172,7 +172,7 @@ class ConfirmActivity : ComponentActivity() {
                     current.isExiting -> finish()
                     // 选择页阶段，返回键 = 放弃进入目标应用，回到桌面
                     // 与「退出获格言」按钮区分：返回键不发放格言，仅克制地离开
-                    // 修复 P0-1：原逻辑返回键 = exitWithFood() 违背直觉，用户未主动选择却被动获得食物
+                    // 修复 P0-1：原逻辑返回键会直接发放奖励，用户未主动选择却被动获得
                     else -> {
                         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                             addCategory(Intent.CATEGORY_HOME)
