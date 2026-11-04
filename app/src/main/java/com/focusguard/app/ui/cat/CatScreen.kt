@@ -338,7 +338,9 @@ fun CatScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "完成反思并退出应用即可获得食物",
+                            // 需求 1：退出被约束应用不再发放猫粮（改为随机格言），
+                            // 猫粮只能通过专注时长获得
+                            text = "专注满 30 分钟即可获得猫粮",
                             color = dimColor,
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center,
