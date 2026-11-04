@@ -2,7 +2,6 @@ package com.focusguard.app.service
 
 import android.app.AlarmManager
 import android.app.Notification
-import android.app.PendingIntent
 import android.app.usage.UsageStatsManager
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -274,15 +273,24 @@ class FocusGuardService : android.app.Service() {
                                 // UsageStats 的前台信息存在刷新延迟，
                                 // fg 此刻可能仍指向用户早已离开的应用，导致提醒丢失。
                                 val target = expiredReminderPkgs.first()
-                                AppDetectionManager.onQuizShown(target)
-                                launchReflectionActivity(target, QuizTrigger.EXPIRY)
+                                // BAL 限制：前台服务在后台启动 Activity 会被系统拦截，
+                                // 而「时长到期」只有轮询引擎能发现（它掌握权威到期时刻）。
+                                // 因此这里只登记启动请求，由拥有 BAL 豁免的无障碍服务真正拉起弹窗。
+                                AppDetectionManager.postPendingExpiryLaunch(target)
                             } else {
                                 // 首次打开 / 切回：事件式触发
                                 val trigger = AppDetectionManager.checkAndTrigger(fg)
                                     ?: AppDetectionManager.checkRecurringTrigger(fg)
                                 if (trigger != null) {
-                                    AppDetectionManager.onQuizShown(fg)
-                                    launchReflectionActivity(fg, trigger)
+                                    // EXPIRY 交给无障碍服务拉起（BAL 限制）：
+                                    // 由它在真正启动弹窗时才置 onQuizShown，
+                                    // 此处若提前置位会让无障碍侧误判"已有弹窗在显示"而放弃拉起。
+                                    if (trigger == QuizTrigger.EXPIRY) {
+                                        AppDetectionManager.postPendingExpiryLaunch(fg)
+                                    } else {
+                                        AppDetectionManager.onQuizShown(fg)
+                                        launchReflectionActivity(fg, trigger)
+                                    }
                                 }
                             }
                         }
@@ -326,7 +334,7 @@ class FocusGuardService : android.app.Service() {
         }
         // 需求 1+4：无障碍服务健康自检
         // - 系统开关仍在但服务没连上 → 保活任务会重建进程并触发系统自动重绑
-        // - 系统开关已被关闭 → 发通知引导用户手动重新开启
+        // - 系统开关已被关闭 → 打标记，由设置页引导卡片提示用户手动重新开启
         KeepAliveManager.checkAccessibilityHealth(this)
     }
 
@@ -470,25 +478,22 @@ class FocusGuardService : android.app.Service() {
 
     /**
      * 构建前台通知
+     *
+     * 需求 2：应用已取消一切用户可见通知，也不申请通知权限。
+     * 但 Android 规定前台服务必须关联一条通知才能保持存活，
+     * 因此这里只保留一条"最低优先级、无声、无角标、不可交互"的占位通知 ——
+     * 它不会出现在通知列表中打扰用户，仅用于满足系统对前台服务的强制要求。
      */
     private fun buildNotification(): Notification {
-        val mainIntent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            mainIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
         return NotificationCompat.Builder(this, FocusGuardApp.NOTIFICATION_CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text))
             .setSmallIcon(R.drawable.ic_shield)
-            .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }

@@ -36,44 +36,28 @@ class FocusGuardApp : Application() {
         )
         AppDetectionManager.setAppRepository(entryPoint.appRepository())
         createNotificationChannel()
-        createAlertNotificationChannel()
     }
 
     /**
      * 创建通知渠道
      * 渠道 ID: focus_guard_service
      * P2：minSdk=26 (O)，SDK_INT >= O 检查冗余已移除
+     *
+     * 需求 2：应用已取消一切用户可见通知（含通知权限申请）。
+     * 此渠道仅供前台服务自身的"常驻通知"使用 —— Android 要求前台服务
+     * 必须关联一条通知才能保持存活，但它不会打扰用户（IMPORTANCE_MIN，无声无角标）。
      */
     private fun createNotificationChannel() {
         val channelId = NOTIFICATION_CHANNEL_ID
         val name = getString(R.string.notification_channel_name)
         val descriptionText = getString(R.string.notification_channel_desc)
-        val importance = NotificationManager.IMPORTANCE_LOW
+        val importance = NotificationManager.IMPORTANCE_MIN
         val channel = NotificationChannel(channelId, name, importance).apply {
             description = descriptionText
             // 守护服务通知不应发出声音
             setShowBadge(false)
-        }
-        val notificationManager =
-            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.createNotificationChannel(channel)
-    }
-
-    /**
-     * 创建「守护异常提醒」通知渠道（需求 1/4）
-     *
-     * 与保活通知渠道分开：保活通知是常驻静音的（IMPORTANCE_LOW），
-     * 而「无障碍被系统关闭」是需要用户立刻看到并处理的告警，
-     * 因此使用 IMPORTANCE_DEFAULT 让它能正常弹出横幅。
-     */
-    private fun createAlertNotificationChannel() {
-        val channel = NotificationChannel(
-            NOTIFICATION_CHANNEL_ALERT,
-            "守护提醒",
-            NotificationManager.IMPORTANCE_DEFAULT
-        ).apply {
-            description = "无障碍服务被系统关闭等守护异常时的提醒"
-            setShowBadge(true)
+            enableVibration(false)
+            enableLights(false)
         }
         val notificationManager =
             getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -81,10 +65,7 @@ class FocusGuardApp : Application() {
     }
 
     companion object {
-        /** 通知渠道 ID */
+        /** 前台服务常驻通知渠道 ID（唯一保留的通知渠道） */
         const val NOTIFICATION_CHANNEL_ID = "focus_guard_service"
-
-        /** 守护异常提醒通知渠道 ID */
-        const val NOTIFICATION_CHANNEL_ALERT = "focus_guard_alert"
     }
 }

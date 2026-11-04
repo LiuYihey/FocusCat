@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 /**
  * 应用监控无障碍服务
@@ -46,11 +47,24 @@ class AppMonitorService : AccessibilityService() {
     /** 前台服务看门狗 Job，onUnbind 时随 serviceScope 一并取消 */
     private var watchdogJob: Job? = null
 
+    /** 「时长到期」提醒拉起 Job，onUnbind 时随 serviceScope 一并取消 */
+    private var expiryWatcherJob: Job? = null
+
     /** 主线程 Handler，用于延迟上报断连（修复 B：防 ROM 临时解绑→重绑的 UI 闪烁） */
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        initializeService()
+    }
+
+    /**
+     * 无障碍服务的统一初始化逻辑
+     *
+     * onServiceConnected（首次绑定）与 onRebind（系统重新绑定）共用，
+     * 保证两条路径下的状态完全一致：协程作用域、看门狗、保活任务、拦截列表。
+     */
+    private fun initializeService() {
         // 修复 B：取消待执行的断连上报——系统在 onUnbind 后快速重新绑定时不报故障
         // 注意：此处取消的是 companion 中的进程级任务，
         // 因此新实例（重新绑定后创建的实例）也能取消旧实例挂的任务
@@ -80,6 +94,8 @@ class AppMonitorService : AccessibilityService() {
         }
         // 启动前台服务看门狗
         startForegroundServiceWatchdog()
+        // 启动「时长到期」提醒拉起通道（前台服务登记，无障碍服务拉起，规避 BAL 限制）
+        startExpiryLaunchWatcher()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -110,6 +126,39 @@ class AppMonitorService : AccessibilityService() {
         val trigger = AppDetectionManager.checkAndTrigger(packageName)
         if (trigger != null) {
             launchReflectionActivity(packageName, trigger)
+        }
+    }
+
+    /**
+     * 「使用时长到期」提醒的启动通道
+     *
+     * 背景：Android 10+ 的 BAL（后台启动 Activity）限制会拦截前台服务在后台拉起弹窗。
+     * 而「时长到期」这一时刻只有轮询引擎（前台服务）能发现 —— 它掌握权威的到期时刻，
+     * 无障碍事件无法感知"时间到了"。
+     *
+     * 因此采用「发现与拉起分离」：
+     * - 前台服务到期时调用 AppDetectionManager.postPendingExpiryLaunch(pkg) 登记请求
+     * - 无障碍服务（有 BAL 豁免）取走请求并真正启动 ReflectionActivity
+     *
+     * 无障碍服务自身还有看门狗循环会周期性检查，因此请求不会漏掉。
+     */
+    private fun startExpiryLaunchWatcher() {
+        expiryWatcherJob?.cancel()
+        expiryWatcherJob = serviceScope.launch {
+            while (isActive) {
+                try {
+                    val pkg = AppDetectionManager.consumePendingExpiryLaunch()
+                    if (pkg != null && !AppDetectionManager.isQuizShowing()) {
+                        AppDetectionManager.onQuizShown(pkg)
+                        launchReflectionActivity(pkg, QuizTrigger.EXPIRY)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // 单次失败不影响后续
+                }
+                delay(EXPIRY_WATCH_INTERVAL_MS)
+            }
         }
     }
 
@@ -187,8 +236,13 @@ class AppMonitorService : AccessibilityService() {
             }
             startActivity(intent)
             // 直启成功，仍提交 pendingTrigger 作为备份：
-            // 若直启的 Activity 被系统立即回收（极端情况），前台服务还能补救
-            AppDetectionManager.postPendingTrigger(targetPackage, trigger)
+            // 若直启的 Activity 被系统立即回收（极端情况），前台服务还能补救。
+            // 例外：EXPIRY 不提交备份 —— 前台服务消费 pendingTrigger 时走的是
+            // checkAndTrigger（只能得到 FIRST/RECURRING），会把到期提醒的语义覆盖掉，
+            // 导致弹窗文案退化成首次拦截、且不展示随机格言。
+            if (trigger != QuizTrigger.EXPIRY) {
+                AppDetectionManager.postPendingTrigger(targetPackage, trigger)
+            }
         } catch (e: Exception) {
             // 路径 2：直启失败（部分 ROM 不给无障碍服务 BAL 豁免）
             // 回退到 pendingTrigger，由前台服务消费后启动
@@ -208,6 +262,49 @@ class AppMonitorService : AccessibilityService() {
         // 空实现
     }
 
+    /**
+     * 需求 3：系统重新绑定无障碍服务时回调
+     *
+     * 背景：onUnbind 返回 true 后，系统在需要时会调用 onRebind 重新建立绑定。
+     * 与 onServiceConnected 相同的初始化逻辑 —— 重建协程作用域、重启前台服务看门狗、
+     * 重新登记保活任务、重新加载拦截列表。
+     */
+    override fun onRebind(intent: Intent?) {
+        super.onRebind(intent)
+        initializeService()
+    }
+
+    /**
+     * 需求 3：服务被销毁时的兜底
+     *
+     * 进程被杀时 onUnbind 不一定被回调（进程直接消失），
+     * 此时需要靠保活任务重建进程、由系统重新绑定无障碍服务。
+     * 这里仅登记保活任务，不做无效的"自己重连"尝试 ——
+     * Android 不允许应用自行开启无障碍服务，自行重连本就不可行。
+     */
+    override fun onDestroy() {
+        watchdogJob?.cancel()
+        serviceScope.cancel()
+        if (AppDetectionManager.isProtectionEnabled) {
+            KeepAliveManager.schedule(this)
+        }
+        super.onDestroy()
+    }
+
+    /**
+     * 用户从最近任务划掉应用时回调
+     *
+     * 需求 3：划掉应用不应关闭无障碍服务。
+     * Manifest 已设 stopWithTask=false 让系统不自动停止本服务，
+     * 这里再登记一次保活任务，确保进程被 ROM 清理后能被拉起重建。
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (AppDetectionManager.isProtectionEnabled) {
+            KeepAliveManager.schedule(this)
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onUnbind(intent: Intent?): Boolean {
         // 修复 B：延迟上报断连，过滤 ROM 临时解绑→重绑的瞬态（<15s）
         // 原代码立即 setAccessibilityConnected(false) 导致 UI 闪烁「故障」，
@@ -224,7 +321,7 @@ class AppMonitorService : AccessibilityService() {
             AppDetectionManager.setAccessibilityConnected(false)
             // 需求 1+4：断连后立即做一次无障碍健康自检
             // - 若系统开关仍开启 → 说明只是进程被杀，保活任务会重建进程并自动重绑
-            // - 若系统开关已被关闭 → 立刻通知用户手动重新开启
+            // - 若系统开关已被关闭 → 立刻提示用户手动重新开启（设置页引导卡片）
             KeepAliveManager.checkAccessibilityHealth(this@AppMonitorService)
         }
         holder[0] = report
@@ -234,7 +331,10 @@ class AppMonitorService : AccessibilityService() {
         serviceScope.cancel()
         // 需求 1+4：断连即重排保活任务，尽早恢复无障碍绑定
         KeepAliveManager.schedule(this)
-        return super.onUnbind(intent)
+        // 需求 3：返回 true —— 告知系统"可以重新绑定"，
+        // 系统重新绑定本服务时会回调 onRebind，走与 onServiceConnected 相同的初始化路径。
+        // 这是「程序退出重启时无障碍不被关闭」的关键：默认返回 false 时系统不再回调绑定。
+        return true
     }
 
     companion object {
@@ -242,6 +342,8 @@ class AppMonitorService : AccessibilityService() {
         private const val WATCHDOG_INTERVAL_MS = 60_000L
         /** 断连上报延迟（毫秒）- 15 秒，过滤 ROM 临时解绑→重绑的瞬态 */
         private const val DISCONNECT_REPORT_DELAY_MS = 15_000L
+        /** 「时长到期」提醒拉起检查间隔（毫秒）- 2 秒，兼顾及时性与开销 */
+        private const val EXPIRY_WATCH_INTERVAL_MS = 2_000L
 
         /**
          * 主线程 Handler（进程级）

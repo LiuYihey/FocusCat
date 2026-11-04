@@ -39,8 +39,6 @@ data class SettingsUiState(
     val permissionStatus: SettingsPermissionStatus = SettingsPermissionStatus(),
     /** 开机自启动是否开启 */
     val bootStartup: Boolean = true,
-    /** 守护通知是否开启 */
-    val notificationEnabled: Boolean = true,
     /** 「持续使用再次提醒」间隔（分钟），0=关闭。默认 30 */
     val recurringIntervalMin: Int = 30,
     /** 导出的数据文件路径 */
@@ -78,7 +76,6 @@ class SettingsViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 bootStartup = sharedPreferences.getBoolean(KEY_BOOT_STARTUP, true),
-                notificationEnabled = sharedPreferences.getBoolean(KEY_NOTIFICATION_ENABLED, true),
                 recurringIntervalMin = savedInterval
             )
         }
@@ -116,15 +113,6 @@ class SettingsViewModel @Inject constructor(
         val newValue = !_uiState.value.bootStartup
         sharedPreferences.edit().putBoolean(KEY_BOOT_STARTUP, newValue).apply()
         _uiState.update { it.copy(bootStartup = newValue) }
-    }
-
-    /**
-     * 切换守护通知开关
-     */
-    fun toggleNotification() {
-        val newValue = !_uiState.value.notificationEnabled
-        sharedPreferences.edit().putBoolean(KEY_NOTIFICATION_ENABLED, newValue).apply()
-        _uiState.update { it.copy(notificationEnabled = newValue) }
     }
 
     /**
@@ -246,8 +234,6 @@ class SettingsViewModel @Inject constructor(
     companion object {
         /** 开机自启动设置键 */
         private const val KEY_BOOT_STARTUP = "boot_startup"
-        /** 守护通知设置键 */
-        private const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
         /** 「再次提醒间隔」设置键（与 AppDetectionManager 共用 focus_guard_prefs） */
         private const val KEY_RECURRING_INTERVAL_MIN = "recurring_interval_min"
         /** 上次非零间隔（用于关闭再开启时恢复用户自定义值，修复 P1-1） */

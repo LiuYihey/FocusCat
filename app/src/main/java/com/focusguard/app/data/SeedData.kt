@@ -4,6 +4,7 @@ import com.focusguard.app.data.local.entity.AffinityAchievementEntity
 import com.focusguard.app.data.local.entity.CatCatalogEntity
 import com.focusguard.app.data.local.entity.FoodCatalogEntity
 import com.focusguard.app.data.local.entity.QuizQuestionEntity
+import com.focusguard.app.data.local.entity.QuoteEntity
 import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
 
 /**
@@ -153,6 +154,53 @@ object SeedData {
                 milestone = 100,
                 title = "灵魂伴侣",
                 description = "投喂 100 次，猫咪是你最忠实的专注伙伴"
+            )
+        )
+    }
+
+    /**
+     * 获取默认小猫格言种子数据（需求 1）
+     *
+     * 退出被约束应用时不再发放猫粮，改为随机展示一句小猫格言。
+     * 这些是内置的警醒句子，用户可在「设置 → 小猫格言管理」中自由增删改。
+     */
+    fun getSeedQuotes(): List<QuoteEntity> {
+        return listOf(
+            QuoteEntity(
+                text = "从现在开始做到快速放下，改变从一点点开始(＾-＾)✎",
+                order = 1,
+                isActive = true,
+                isCustom = false
+            ),
+            QuoteEntity(
+                text = "放下手机的那一刻，你已经把选择权握回手里了",
+                order = 2,
+                isActive = true,
+                isCustom = false
+            ),
+            QuoteEntity(
+                text = "三分钟的分心，换不来三分钟的快乐，只换来了更长的拖延",
+                order = 3,
+                isActive = true,
+                isCustom = false
+            ),
+            QuoteEntity(
+                text = "专注不是天赋，是每一次主动放下的总和",
+                order = 4,
+                isActive = true,
+                isCustom = false
+            ),
+            QuoteEntity(
+                text = "想清楚再离开，比急着回去更值得",
+                order = 5,
+                isActive = true,
+                isCustom = false
+            ),
+            QuoteEntity(
+                text = "今天多守住的一小时，就是明天的底气",
+                order = 6,
+                isActive = true,
+                isCustom = false
             )
         )
     }

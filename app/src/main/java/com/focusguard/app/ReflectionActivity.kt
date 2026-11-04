@@ -50,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.SelfImprovement
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.runtime.Composable
@@ -152,6 +153,10 @@ class ReflectionActivity : ComponentActivity() {
         AppDetectionManager.onQuizShown(targetPackage)
         // 加载反思问题
         viewModel.loadQuestions(targetPackage)
+        // 需求 1：「提醒时间到了」场景展示一句随机小猫格言
+        if (trigger == QuizTrigger.EXPIRY) {
+            viewModel.loadRandomQuote()
+        }
 
         // 拦截返回键 - 返回即放弃进入目标应用（符合专注守护理念）
         // Bug 5：弹窗解耦 - 回退直接关闭弹窗 + 退出约束的娱乐 app，不影响 FocusCat 主界面
@@ -278,6 +283,10 @@ class ReflectionActivity : ComponentActivity() {
             trigger = QuizTrigger.fromName(intent.getStringExtra(EXTRA_TRIGGER))
             elapsedMin = intent.getIntExtra(EXTRA_ELAPSED_MIN, 0)
             expiryMin = resolveExpiryMin(targetPackage)
+            // 需求 1：新拦截若为「提醒时间到了」，重新抽一句格言
+            if (trigger == QuizTrigger.EXPIRY) {
+                viewModel.loadRandomQuote()
+            }
         }
     }
 
@@ -518,6 +527,52 @@ private fun ReflectionContent(
             fontSize = 15.sp,
             modifier = Modifier.padding(top = 8.dp)
         )
+
+        // 需求 1：「提醒时间到了」时展示一句随机小猫格言
+        // 格言库为空时（用户清空全部格言）不展示该区块，不阻塞问答流程
+        if (isExpiry) {
+            val quote = state.expiryQuote
+            if (quote != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = cardColor),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.FormatQuote,
+                            contentDescription = null,
+                            tint = accentColor.copy(alpha = 0.6f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "小猫想对你说",
+                                color = accentColor.copy(alpha = 0.8f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                letterSpacing = 1.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = quote,
+                                color = textColor,
+                                fontSize = 16.sp,
+                                lineHeight = 24.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(20.dp))
 

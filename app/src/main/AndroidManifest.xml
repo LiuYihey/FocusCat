@@ -20,8 +20,8 @@
     <!-- 电池优化白名单（避免系统杀死无障碍服务，解决退出后权限失效） -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <!-- 通知权限（Android 13+ 前台服务通知必需，否则 startForeground 会崩溃） -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 需求 2：已取消全部用户可见通知，故不申请 POST_NOTIFICATIONS 权限。
+         前台服务仍会创建一条不可见的常驻通知（系统要求），不会打扰用户。 -->
 
     <!-- 精确闹钟（保活守护闹钟，Android 12+ 需用户授权，可被撤销后自动降级） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -111,10 +111,15 @@
             android:theme="@style/Theme.FocusGuard.Quiz" />
 
         <!-- 无障碍服务 - 监听应用启动 -->
+        <!-- 需求 3：stopWithTask=false —— 用户从最近任务划掉应用时，
+             系统默认会连带停止该任务内的服务，导致无障碍服务被关闭。
+             设为 false 后，划掉应用不会停掉无障碍服务，
+             它由系统按绑定关系持续托管，进程重建后自动重新绑定。 -->
         <service
             android:name=".accessibility.AppMonitorService"
             android:label="@string/accessibility_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:stopWithTask="false"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

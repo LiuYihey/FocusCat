@@ -20,6 +20,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.SentimentDissatisfied
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -27,7 +28,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,7 +36,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -75,37 +74,33 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import com.focusguard.app.detection.AppDetectionManager
 import com.focusguard.app.ui.components.CelebrationParticles
-import com.focusguard.app.ui.components.FoodCanvas
 import com.focusguard.app.ui.components.LottieCelebration
 import com.focusguard.app.ui.reflection.ConfirmViewModel
 import com.focusguard.app.ui.theme.FocusGuardTheme
-import com.focusguard.app.ui.theme.RarityCommon
-import com.focusguard.app.ui.theme.RarityEpic
-import com.focusguard.app.ui.theme.RarityRare
 import com.focusguard.app.util.getAppName
 import dagger.hilt.android.AndroidEntryPoint
 
 /**
- * 确认/食物奖励 Activity
+ * 确认/格言奖励 Activity
  * 反思问答提交后的二次抉择页
  *
  * 设计理念：Positive Reward（正向奖励）
- * 用户选择退出即可获得随机食物，把「克制」变成「收获」
+ * 用户选择退出即可获得一句随机小猫格言，把「克制」变成「收获」
  *
  * 两个选项：
  * 1. 确认进入 → 启动目标应用
- * 2. 退出获食物 → 发放随机食物 + 显示获得动画
+ * 2. 退出获格言 → 随机抽取一句小猫格言 + 显示揭晓动效
  */
 
 /**
  * 确认页阶段
  */
 private enum class ConfirmPhase {
-    /** 选择页（确认进入 / 退出获食物） */
+    /** 选择页（确认进入 / 退出获格言） */
     CHOICE,
-    /** 获得食物 */
+    /** 获得格言 */
     OBTAINED,
-    /** 发放失败 */
+    /** 获取失败 */
     FAILED
 }
 
@@ -125,7 +120,7 @@ class ConfirmActivity : ComponentActivity() {
      * 标记用户是否选择了"还是进入"（onAppEntered 已调用）
      * onStop 时据此判断是否需要清空 lastAppEnterPkg：
      * - true：用户选择了进入应用，lastAppEnterPkg 保留用于 recurring 计时
-     * - false：用户按 home 键/返回键/退出获食物，清空 lastAppEnterPkg 避免残留
+     * - false：用户按 home 键/返回键/退出获格言，清空 lastAppEnterPkg 避免残留
      */
     private var hasUserEnteredApp: Boolean = false
 
@@ -173,10 +168,10 @@ class ConfirmActivity : ComponentActivity() {
             override fun handleOnBackPressed() {
                 val current = viewModel.state.value
                 when {
-                    // 已进入"获得食物"页或发放失败页，返回键直接关闭
+                    // 已进入"获得格言"页或获取失败页，返回键直接关闭
                     current.isExiting -> finish()
                     // 选择页阶段，返回键 = 放弃进入目标应用，回到桌面
-                    // 与「退出获食物」按钮区分：返回键不发放食物，仅克制地离开
+                    // 与「退出获格言」按钮区分：返回键不发放格言，仅克制地离开
                     // 修复 P0-1：原逻辑返回键 = exitWithFood() 违背直觉，用户未主动选择却被动获得食物
                     else -> {
                         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
@@ -199,9 +194,9 @@ class ConfirmActivity : ComponentActivity() {
                 ) {
                     val state by viewModel.state.collectAsStateWithLifecycle()
 
-                    // 用阶段枚举驱动 AnimatedContent，让反思→确认→发放→收获的情感高潮丝滑过渡
+                    // 用阶段枚举驱动 AnimatedContent，让反思→确认→揭晓→收获的情感高潮丝滑过渡
                     val phase = when {
-                        state.isExiting && state.grantedFood != null -> ConfirmPhase.OBTAINED
+                        state.isExiting && state.grantedQuote != null -> ConfirmPhase.OBTAINED
                         state.isExiting -> ConfirmPhase.FAILED
                         else -> ConfirmPhase.CHOICE
                     }
@@ -217,19 +212,8 @@ class ConfirmActivity : ComponentActivity() {
                     ) { p ->
                         when (p) {
                             ConfirmPhase.OBTAINED -> {
-                                FoodObtainedContent(
-                                    foodId = state.grantedFood!!.foodId,
-                                    foodName = state.grantedFood!!.displayName,
-                                    affinityBonus = state.grantedFood!!.affinityBonus,
-                                    rarity = state.grantedFood!!.rarity,
-                                    onGoFeed = {
-                                        MainActivity.requestNavigateToCat()
-                                        val mainIntent = Intent(this@ConfirmActivity, MainActivity::class.java).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                                        }
-                                        startActivity(mainIntent)
-                                        finish()
-                                    },
+                                QuoteObtainedContent(
+                                    quote = state.grantedQuote ?: "",
                                     onClose = {
                                         val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                                             addCategory(Intent.CATEGORY_HOME)
@@ -260,14 +244,14 @@ class ConfirmActivity : ComponentActivity() {
                                     )
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text(
-                                        text = "食物暂时没准备好，稍后再试一次吧",
+                                        text = "格言暂时没准备好，稍后再试一次吧",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 16.sp,
                                         textAlign = TextAlign.Center
                                     )
                                     Spacer(modifier = Modifier.height(24.dp))
                                     Button(
-                                        onClick = { viewModel.exitWithFood() },
+                                        onClick = { viewModel.exitWithQuote() },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(48.dp),
@@ -324,11 +308,11 @@ class ConfirmActivity : ComponentActivity() {
                                         // "首次打开"再次弹窗，用户卡在问答页无法进入应用。
                                         finish()
                                     },
-                                    onExitWithFood = {
-                                        // 用户选择退出获食物：结束本次「进入应用」会话，
+                                    onExitWithQuote = {
+                                        // 用户选择退出获格言：结束本次「进入应用」会话，
                                         // 确保下次再打开该应用能被正常拦截为新会话
                                         AppDetectionManager.clearAppEnterSession()
-                                        viewModel.exitWithFood()
+                                        viewModel.exitWithQuote()
                                     }
                                 )
                             }
@@ -352,8 +336,8 @@ class ConfirmActivity : ComponentActivity() {
             selectedDurationMin = intent.getIntExtra(ReflectionActivity.EXTRA_SELECTED_DURATION_MIN, 0)
             // 重置进入标志：新拦截周期开始
             hasUserEnteredApp = false
-            // 重置全部状态：取消旧发放协程，清空 isExiting/grantedFood
-            // 否则若上次拦截已到 OBTAINED/FAILED 阶段，新拦截仍显示旧的食物结果
+            // 重置全部状态：取消旧获取协程，清空 isExiting/grantedQuote
+            // 否则若上次拦截已到 OBTAINED/FAILED 阶段，新拦截仍显示旧的格言结果
             viewModel.resetForNewInterception(pkg)
             // 重新标记拦截页显示（防止 polling 在 ConfirmActivity 期间重复弹窗）
             AppDetectionManager.onQuizShown(pkg)
@@ -405,7 +389,7 @@ private fun ConfirmChoiceContent(
     targetAppName: String,
     durationMin: Int = 0,
     onConfirmEnter: () -> Unit,
-    onExitWithFood: () -> Unit
+    onExitWithQuote: () -> Unit
 ) {
     val hapticFeedback = LocalHapticFeedback.current
     val textColor = MaterialTheme.colorScheme.onBackground
@@ -451,7 +435,7 @@ private fun ConfirmChoiceContent(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "退出可获得一份随机食物",
+            text = "退出可获得一句小猫格言",
             color = dimColor,
             fontSize = 15.sp,
             textAlign = TextAlign.Center
@@ -470,11 +454,11 @@ private fun ConfirmChoiceContent(
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        // 退出获食物按钮 - 主按钮（正向行为，用品牌 primary 色保持全 App 一致，对比度 16.5:1）
+        // 退出获格言按钮 - 主按钮（正向行为，用品牌 primary 色保持全 App 一致，对比度 16.5:1）
         Button(
             onClick = {
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                onExitWithFood()
+                onExitWithQuote()
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -485,7 +469,7 @@ private fun ConfirmChoiceContent(
             )
         ) {
             Text(
-                text = "退出，收获一份食物",
+                text = "退出，收获一句格言",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onPrimary
@@ -494,7 +478,7 @@ private fun ConfirmChoiceContent(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 确认进入按钮 - 次要按钮（弱化，引导用户优先选择退出获食物）
+        // 确认进入按钮 - 次要按钮（弱化，引导用户优先选择退出获格言）
         OutlinedButton(
             onClick = {
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -516,39 +500,22 @@ private fun ConfirmChoiceContent(
 }
 
 /**
- * 获得食物的展示页
+ * 获得格言的展示页（需求 1）
  *
- * 集成了揭晓动效（原 FoodLotteryAnimation 已合并）：
- * 1. 食物：柔和缩放淡入（EaseOut，无旋转/无过冲），像光晕中缓缓浮现
+ * 保留原「获得食物」的揭晓仪式感，但主体改为一句小猫格言：
+ * 1. 标题：柔和缩放淡入（EaseOutCubic，无旋转/无过冲）
  * 2. 光晕：双层呼吸式径向渐变（持续脉动，模拟柔和发光）
- * 3. 漂浮粒子：Canvas 绘制的微光点缓慢上浮（高级氛围感）
- * 4. 文字：分阶段淡入（标题→卡片内容→按钮），克制留白
- * 5. 稀有度色边：卡片顶部细线渐变（信息层级清晰）
+ * 3. 漂浮粒子：Canvas 绘制的微光点缓慢上浮
+ * 4. 格言卡片：引号装饰 + 居中文字，分阶段淡入
+ * 5. 文字：分阶段淡入（标题→卡片内容→按钮），克制留白
  *
  * 同时保留原有的 LottieCelebration + CelebrationParticles 庆祝效果
  */
 @Composable
-private fun FoodObtainedContent(
-    foodId: String,
-    foodName: String,
-    affinityBonus: Int,
-    rarity: String,
-    onGoFeed: () -> Unit,
+private fun QuoteObtainedContent(
+    quote: String,
     onClose: () -> Unit
 ) {
-    val rarityText = when (rarity) {
-        "common" -> "普通"
-        "rare" -> "稀有"
-        "epic" -> "史诗"
-        else -> "普通"
-    }
-    val rarityColor = when (rarity) {
-        "common" -> RarityCommon
-        "rare" -> RarityRare
-        "epic" -> RarityEpic
-        else -> RarityCommon
-    }
-
     val textColor = MaterialTheme.colorScheme.onBackground
     val accentColor = MaterialTheme.colorScheme.primary
     val cardColor = MaterialTheme.colorScheme.surface
@@ -557,63 +524,61 @@ private fun FoodObtainedContent(
     val hapticFeedback = LocalHapticFeedback.current
 
     // === 出现阶段 ===
-    // 0: 初始  1: 食物浮现  2: 文字淡入  3: 按钮淡入
+    // 0: 初始  1: 标题浮现  2: 格言淡入  3: 按钮淡入
     var appearPhase by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) {
         appearPhase = 1
-        if (rarity == "rare" || rarity == "epic") {
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-        }
+        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
         delay(320)
         appearPhase = 2
         delay(200)
         appearPhase = 3
     }
 
-    // 食物：柔和缩放（0.85→1）+ 淡入，EaseOutCubic 缓动
-    val foodScale by animateFloatAsState(
+    // 标题：柔和缩放（0.85→1）+ 淡入，EaseOutCubic 缓动
+    val titleScale by animateFloatAsState(
         targetValue = if (appearPhase >= 1) 1f else 0.85f,
         animationSpec = tween(560, easing = EaseOutCubic),
-        label = "food_scale"
+        label = "quote_title_scale"
     )
-    val foodAlpha by animateFloatAsState(
+    val titleAlpha by animateFloatAsState(
         targetValue = if (appearPhase >= 1) 1f else 0f,
         animationSpec = tween(480, easing = EaseOutCubic),
-        label = "food_alpha"
+        label = "quote_title_alpha"
     )
 
     // 光晕：初始扩散 + 持续呼吸（双层）
     val glowAlpha by animateFloatAsState(
         targetValue = if (appearPhase >= 1) 0.22f else 0f,
         animationSpec = tween(700, easing = EaseOutCubic),
-        label = "glow_alpha"
+        label = "quote_glow_alpha"
     )
-    val infiniteTransition = rememberInfiniteTransition(label = "glow_breath")
+    val infiniteTransition = rememberInfiniteTransition(label = "quote_glow_breath")
     val breath by infiniteTransition.animateFloat(
         initialValue = 0.85f, targetValue = 1.15f,
         animationSpec = infiniteRepeatable(tween(2400, easing = EaseInOutSine), RepeatMode.Reverse),
-        label = "breath"
+        label = "quote_breath"
     )
 
-    // 文字淡入
-    val textAlpha by animateFloatAsState(
+    // 格言淡入
+    val quoteAlpha by animateFloatAsState(
         targetValue = if (appearPhase >= 2) 1f else 0f,
         animationSpec = tween(420, easing = EaseOutCubic),
-        label = "text_alpha"
+        label = "quote_text_alpha"
     )
 
     // 按钮淡入
     val buttonAlpha by animateFloatAsState(
         targetValue = if (appearPhase >= 3) 1f else 0f,
         animationSpec = tween(400, easing = EaseOutCubic),
-        label = "button_alpha"
+        label = "quote_button_alpha"
     )
 
     // 漂浮粒子（Canvas，缓慢上浮的微光点）
     val particleProgress by infiniteTransition.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(6000, easing = LinearEasing), RepeatMode.Restart),
-        label = "particle_progress"
+        label = "quote_particle_progress"
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -633,17 +598,22 @@ private fun FoodObtainedContent(
             verticalArrangement = Arrangement.Center
         ) {
             // 标题（淡入）
-            Text(
-                text = "获得食物",
-                color = accentColor,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.alpha(textAlpha)
-            )
+            Box(
+                modifier = Modifier
+                    .scale(titleScale)
+                    .alpha(titleAlpha)
+            ) {
+                Text(
+                    text = "小猫想对你说",
+                    color = accentColor,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // 食物卡片（含揭晓动效：稀有度线、粒子、光晕、缩放淡入）
+            // 格言卡片（含光晕、粒子、缩放淡入）
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
@@ -655,7 +625,7 @@ private fun FoodObtainedContent(
                         .fillMaxWidth()
                         .height(280.dp)
                 ) {
-                    // 顶部稀有度渐变细线
+                    // 顶部渐变细线
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -665,7 +635,7 @@ private fun FoodObtainedContent(
                                 Brush.horizontalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        rarityColor.copy(alpha = 0.7f),
+                                        accentColor.copy(alpha = 0.7f),
                                         Color.Transparent
                                     )
                                 )
@@ -685,7 +655,7 @@ private fun FoodObtainedContent(
                             val y = startY + (endY - startY) * ((particleProgress + seed) % 1f)
                             val lifeAlpha = 1f - ((particleProgress + seed) % 1f)
                             val radius = 1.5f + (seed * 2f)
-                            val color = rarityColor.copy(alpha = lifeAlpha * 0.5f)
+                            val color = accentColor.copy(alpha = lifeAlpha * 0.5f)
                             drawCircle(color = color, radius = radius, center = Offset(x, y))
                         }
                     }
@@ -694,16 +664,15 @@ private fun FoodObtainedContent(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(vertical = 40.dp),
+                            .padding(horizontal = 28.dp, vertical = 40.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        // 食物 + 双层呼吸光晕
+                        // 双层呼吸光晕
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier.size(150.dp)
                         ) {
-                            // 外层大光晕（呼吸）
                             Box(
                                 modifier = Modifier
                                     .size((130.dp * breath))
@@ -716,78 +685,39 @@ private fun FoodObtainedContent(
                                         )
                                     )
                             )
-                            // 内层小光晕（呼吸，反相）
                             Box(
                                 modifier = Modifier
                                     .size((100.dp * (2f - breath)))
                                     .background(
                                         Brush.radialGradient(
                                             colors = listOf(
-                                                rarityColor.copy(alpha = glowAlpha * 0.5f),
+                                                accentColor.copy(alpha = glowAlpha * 0.5f),
                                                 Color.Transparent
                                             )
                                         )
                                     )
                             )
-                            // 食物图（柔和缩放淡入）
-                            Box(
-                                modifier = Modifier
-                                    .scale(foodScale)
-                                    .alpha(foodAlpha)
-                            ) {
-                                FoodCanvas(
-                                    foodId = foodId,
-                                    modifier = Modifier.size(96.dp),
-                                    size = 96
-                                )
-                            }
+                            // 引号装饰
+                            Icon(
+                                imageVector = Icons.Filled.FormatQuote,
+                                contentDescription = null,
+                                tint = accentColor.copy(alpha = 0.35f),
+                                modifier = Modifier.size(56.dp)
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(24.dp))
 
-                        // 文字信息（简单淡入）
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.alpha(textAlpha)
-                        ) {
-                            Text(
-                                text = foodName,
-                                color = textColor,
-                                fontSize = 26.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .background(rarityColor, RoundedCornerShape(3.dp))
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = rarityText,
-                                    color = rarityColor,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = "·",
-                                    color = dimColor.copy(alpha = 0.5f),
-                                    fontSize = 14.sp
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = "好感度 +$affinityBonus",
-                                    color = accentColor,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
+                        // 格言正文
+                        Text(
+                            text = quote,
+                            color = textColor,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            lineHeight = 34.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.alpha(quoteAlpha)
+                        )
                     }
                 }
             }
@@ -796,10 +726,10 @@ private fun FoodObtainedContent(
 
             // 副标题（淡入）
             Text(
-                text = "猫咪会很开心",
+                text = "放下，是为了更好地拿起",
                 color = dimColor,
                 fontSize = 15.sp,
-                modifier = Modifier.alpha(textAlpha)
+                modifier = Modifier.alpha(quoteAlpha)
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -811,7 +741,7 @@ private fun FoodObtainedContent(
                 Button(
                     onClick = {
                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onGoFeed()
+                        onClose()
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -820,7 +750,7 @@ private fun FoodObtainedContent(
                     colors = ButtonDefaults.buttonColors(containerColor = accentColor)
                 ) {
                     Text(
-                        text = "去投喂",
+                        text = "我记住了",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimary
@@ -839,7 +769,7 @@ private fun FoodObtainedContent(
                         .height(48.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(text = "稍后再喂", color = dimColor)
+                    Text(text = "返回桌面", color = dimColor)
                 }
             }
         }

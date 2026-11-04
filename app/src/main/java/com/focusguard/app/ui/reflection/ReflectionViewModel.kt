@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.focusguard.app.data.local.entity.ReflectionAnswerEntity
 import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
+import com.focusguard.app.data.repository.QuoteRepository
 import com.focusguard.app.data.repository.ReflectionRepository
 import com.focusguard.app.util.ReflectionOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -72,7 +73,12 @@ data class ReflectionUiState(
     /** 错误提示 */
     val errorMessage: String? = null,
     /** 用户选中的使用时长（分钟），0 表示未选择或无时长题 */
-    val selectedDurationMinutes: Int = 0
+    val selectedDurationMinutes: Int = 0,
+    /**
+     * 「提醒时间到了」场景展示的随机小猫格言（需求 1）
+     * null 表示尚未加载或格言库为空
+     */
+    val expiryQuote: String? = null
 )
 
 /**
@@ -84,7 +90,8 @@ data class ReflectionUiState(
  */
 @HiltViewModel
 class ReflectionViewModel @Inject constructor(
-    private val reflectionRepository: ReflectionRepository
+    private val reflectionRepository: ReflectionRepository,
+    private val quoteRepository: QuoteRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ReflectionUiState())
@@ -158,6 +165,25 @@ class ReflectionViewModel @Inject constructor(
                         errorMessage = "加载问题失败"
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * 加载一句随机小猫格言用于「提醒时间到了」场景展示（需求 1）
+     *
+     * 与退出获格言用的是同一份格言库与随机策略；
+     * 格言库为空时保持 expiryQuote = null，UI 层不展示该区块。
+     */
+    fun loadRandomQuote() {
+        viewModelScope.launch {
+            try {
+                val quote = quoteRepository.getRandomQuote()?.text
+                _state.update { it.copy(expiryQuote = quote) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(expiryQuote = null) }
             }
         }
     }

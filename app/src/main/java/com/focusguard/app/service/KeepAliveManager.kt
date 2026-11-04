@@ -65,13 +65,6 @@ object KeepAliveManager {
     /** 精确闹钟不可用时的降级守护间隔（毫秒） */
     private const val ALARM_INTERVAL_INEXACT_MS = 5 * 60 * 1000L
 
-    /** 两次"无障碍被关闭"通知的最小间隔（毫秒），避免刷屏 */
-    private const val NOTIFY_THROTTLE_MS = 10 * 60 * 1000L
-
-    /** 上次发送"无障碍被关闭"通知的时间戳 */
-    @Volatile
-    private var lastDisabledNotifyAt = 0L
-
     /**
      * 启动全部保活机制（守护开启时调用）
      */
@@ -307,7 +300,7 @@ object KeepAliveManager {
      * A. 系统设置里仍是"开启"，但当前进程没连上 → 被 ROM 杀进程后未重绑。
      *    重建进程（保活任务本身就在新进程中执行）→ 系统自动重绑，无需打扰用户。
      * B. 系统设置里已被关闭 → Android 不允许 App 自行开启无障碍服务，
-     *    只能发通知引导用户手动重新开启。
+     *    只能由用户在设置页看到引导卡片后手动重新开启（需求 2：不再发通知）。
      */
     fun checkAccessibilityHealth(context: Context) {
         val enabledInSettings = PermissionHelper.checkAccessibilityPermission(context)
@@ -319,48 +312,8 @@ object KeepAliveManager {
             // 原实现只在关闭时打标记、从不主动清除，导致一次误判后提示永远挂着。
             AppDetectionManager.markAccessibilityRestored()
         } else {
-            // 场景 B：开关被关闭 —— 引导用户手动重新开启
+            // 场景 B：开关被关闭 —— 打标记，由设置页的引导卡片提示用户手动重新开启
             AppDetectionManager.markAccessibilityDisabled()
-            notifyAccessibilityDisabled(context)
         }
     }
-
-    /**
-     * 发送"无障碍服务已被关闭"的引导通知
-     * 点击后直达系统无障碍设置页。
-     */
-    private fun notifyAccessibilityDisabled(context: Context) {
-        val now = System.currentTimeMillis()
-        if (now - lastDisabledNotifyAt < NOTIFY_THROTTLE_MS) return
-        lastDisabledNotifyAt = now
-        try {
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
-                as? android.app.NotificationManager ?: return
-            val settingsIntent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            val pendingIntent = PendingIntent.getActivity(
-                context,
-                43001,
-                settingsIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val notification = androidx.core.app.NotificationCompat.Builder(
-                context,
-                com.focusguard.app.FocusGuardApp.NOTIFICATION_CHANNEL_ALERT
-            )
-                .setContentTitle("守护已暂停")
-                .setContentText("系统关闭了无障碍服务，点击重新开启守护")
-                .setSmallIcon(com.focusguard.app.R.drawable.ic_shield)
-                .setContentIntent(pendingIntent)
-                .setAutoCancel(true)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
-                .build()
-            manager.notify(ACCESSIBILITY_DISABLED_NOTIFICATION_ID, notification)
-        } catch (e: Exception) {
-            // 通知失败不影响主流程
-        }
-    }
-
-    /** "无障碍被关闭"引导通知 ID */
-    const val ACCESSIBILITY_DISABLED_NOTIFICATION_ID = 1002
 }

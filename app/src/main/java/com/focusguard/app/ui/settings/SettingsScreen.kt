@@ -29,8 +29,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Schedule
@@ -93,6 +93,7 @@ import java.io.File
 fun SettingsScreen(
     onNavigateToReflectionQuestions: () -> Unit = {},
     onNavigateToCatSwitch: () -> Unit = {},
+    onNavigateToQuotes: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -231,17 +232,6 @@ fun SettingsScreen(
                         viewModel.toggleBootStartup()
                     }
                 )
-                IosDivider()
-                // 守护通知
-                IosSwitchRow(
-                    icon = Icons.Filled.Notifications,
-                    title = "守护通知",
-                    checked = uiState.notificationEnabled,
-                    onCheckedChange = {
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        viewModel.toggleNotification()
-                    }
-                )
             }
 
             Spacer(modifier = Modifier.size(24.dp))
@@ -269,6 +259,16 @@ fun SettingsScreen(
                     onClick = {
                         hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onNavigateToReflectionQuestions()
+                    }
+                )
+                IosDivider()
+                // 小猫格言管理（导航行，需求 1）
+                IosNavigationRow(
+                    icon = Icons.Filled.FormatQuote,
+                    title = "小猫格言管理",
+                    onClick = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onNavigateToQuotes()
                     }
                 )
                 IosDivider()

@@ -202,6 +202,42 @@ object AppDetectionManager {
     private var pendingTrigger: Pair<String, QuizTrigger>? = null
 
     /**
+     * 挂起的「使用时长到期」提醒启动请求
+     *
+     * BAL（后台启动 Activity）限制：前台服务在后台启动 Activity 会被系统拦截
+     * （Android 10+ Background activity launch starts），
+     * 而无障碍服务由系统授予豁免，可以可靠启动。
+     *
+     * 「时长到期」只有轮询引擎（前台服务）能发现 —— 它掌握权威的到期时刻与前台应用信息；
+     * 但「启动弹窗」必须交给无障碍服务执行。
+     * 因此这里作为两者之间的交接通道：前台服务登记，无障碍服务取走并启动。
+     *
+     * 用 List 而非单值：理论上多个应用可同时存在豁免窗口。
+     */
+    private val pendingExpiryLaunches = mutableListOf<String>()
+
+    /**
+     * 登记一条「时长到期」提醒的启动请求（由前台服务调用）
+     */
+    fun postPendingExpiryLaunch(pkg: String) {
+        synchronized(this) {
+            if (!pendingExpiryLaunches.contains(pkg)) {
+                pendingExpiryLaunches.add(pkg)
+            }
+        }
+    }
+
+    /**
+     * 取走一条待启动的「时长到期」提醒（由无障碍服务调用）
+     * @return 待启动的包名，无则返回 null
+     */
+    fun consumePendingExpiryLaunch(): String? {
+        synchronized(this) {
+            return pendingExpiryLaunches.removeFirstOrNull()
+        }
+    }
+
+    /**
      * 获取并清除挂起的拦截请求
      * 由前台服务轮询时调用，返回后自动清空
      * @return 挂起的拦截 (pkg, trigger)，无则返回 null

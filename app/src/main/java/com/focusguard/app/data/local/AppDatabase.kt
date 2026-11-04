@@ -14,6 +14,7 @@ import com.focusguard.app.data.local.dao.FoodInventoryDao
 import com.focusguard.app.data.local.dao.FocusSessionDao
 import com.focusguard.app.data.local.dao.QuizHistoryDao
 import com.focusguard.app.data.local.dao.QuizQuestionDao
+import com.focusguard.app.data.local.dao.QuoteDao
 import com.focusguard.app.data.local.dao.ReflectionAnswerDao
 import com.focusguard.app.data.local.dao.ReflectionQuestionDao
 import com.focusguard.app.data.local.dao.UserCatDao
@@ -25,6 +26,7 @@ import com.focusguard.app.data.local.entity.FoodInventoryEntity
 import com.focusguard.app.data.local.entity.FocusSessionEntity
 import com.focusguard.app.data.local.entity.QuizHistoryEntity
 import com.focusguard.app.data.local.entity.QuizQuestionEntity
+import com.focusguard.app.data.local.entity.QuoteEntity
 import com.focusguard.app.data.local.entity.ReflectionAnswerEntity
 import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
 import com.focusguard.app.data.local.entity.UserCatEntity
@@ -50,9 +52,10 @@ import com.focusguard.app.data.local.entity.UserCatEntity
         FoodInventoryEntity::class,
         ReflectionQuestionEntity::class,
         ReflectionAnswerEntity::class,
-        AffinityAchievementEntity::class
+        AffinityAchievementEntity::class,
+        QuoteEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -89,6 +92,9 @@ abstract class AppDatabase : RoomDatabase() {
 
     /** 好感度成就 DAO */
     abstract fun affinityAchievementDao(): AffinityAchievementDao
+
+    /** 小猫格言 DAO */
+    abstract fun quoteDao(): QuoteDao
 
     companion object {
         @Volatile
@@ -305,6 +311,26 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
+         * v6 → v7 迁移：新增小猫格言表（需求 1）
+         *
+         * 退出约束应用时不再发放猫粮，改为随机展示一句小猫格言；
+         * 格言内容由用户自行编写，可在设置中增删改。
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS quotes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        text TEXT NOT NULL,
+                        `order` INTEGER NOT NULL,
+                        isActive INTEGER NOT NULL,
+                        isCustom INTEGER NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
+        /**
          * 获取数据库单例实例
          * @param context 上下文
          * @return 数据库实例
@@ -317,7 +343,8 @@ abstract class AppDatabase : RoomDatabase() {
                     "focusguard.db"
                 )
                     .addMigrations(
-                        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6
+                        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
+                        MIGRATION_6_7
                     )
                     // 仅在数据库降级时销毁数据，升级时通过 Migration 保留用户数据
                     .fallbackToDestructiveMigrationOnDowngrade()

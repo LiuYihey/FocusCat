@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlin.random.Random
 
 /**
  * AI 生成图片猫咪展示组件
@@ -84,8 +85,22 @@ fun CatCanvas(
     val isIdleVideo = useVideo && state in listOf("idle", "sleeping") && idleVideoExists
 
     if (isEating || isIdleVideo) {
-        // idle 序列索引：0=idle, 1=分支1, 2=idle, 3=分支2, ...
-        var sequenceIndex by remember(breedId) { mutableStateOf(0) }
+        // === 需求 4：随机起始的 idle 视频轮播 ===
+        //
+        // 原有轮播顺序：idle(舔爪) → 踩奶 → idle → 伸懒腰 → idle → 蝴蝶 → 循环
+        // 改造后：进入首页/从其他页面返回时，从"任意一个动作视频或舔爪视频"中随机挑一个作为起点，
+        //        起点视频从头播放；播完后续仍按原顺序（idle → 各动作）轮播，
+        //        即"播放顺序不变，只是起点随机"，提高用户看到不同小猫动作的几率。
+        //
+        // 换猫（breedId 变化）时同样重新随机起点 —— 因为各猫的动作视频不同。
+
+        // 轮播序列：偶数索引=idle 舔爪视频，奇数索引=分支动作视频
+        // 序列长度 = 2 * 分支数（无分支时退化为只循环 idle）
+
+        // 序列索引：remember(breedId) 保证换猫时重置为新的随机起点
+        var sequenceIndex by remember(breedId) {
+            mutableStateOf(pickRandomSequenceIndex(availableBranches.size))
+        }
 
         // 当前应播放的视频路径与回调
         val currentVideoPath: String
@@ -104,11 +119,11 @@ fun CatCanvas(
                 availableBranches.getOrNull(branchIdx) ?: idleVideoPath
             }
             currentOnCompletion = {
-                val sequenceLength = 2 * availableBranches.size
-                if (availableBranches.isEmpty()) {
+                val len = 2 * availableBranches.size
+                if (len == 0) {
                     sequenceIndex = 0
                 } else {
-                    sequenceIndex = (sequenceIndex + 1) % sequenceLength
+                    sequenceIndex = (sequenceIndex + 1) % len
                     if (sequenceIndex % 2 == 1) {
                         val branchIdx = (sequenceIndex - 1) / 2
                         if (branchIdx >= availableBranches.size) {
@@ -126,9 +141,9 @@ fun CatCanvas(
             edgeFade = edgeFade,
             onCompletion = currentOnCompletion,
             fallbackBitmap = bitmap,
-            // 需求 2：待机主视频从中段随机时刻开始播放，每次进入都是新画面；
-            // 分支动作视频（踩奶/伸懒腰/蝴蝶）必须从头完整播放，不做随机
-            randomStart = currentVideoPath == idleVideoPath,
+            // 需求 4：随机选中的视频一律从头播放，
+            // 不再从 idle 视频的中段切入（那会让动作视频看起来像"被截断"）
+            randomStart = false,
             // 需求 2：换猫时用品种 ID 作为内容标识，
             // 组件据此遮住上一只猫的残留画面，保证不会显示错误的猫
             contentKey = breedId
@@ -268,6 +283,29 @@ private data class Quad(
     val translateY: Float,
     val rotation: Float
 )
+
+/**
+ * 随机挑选轮播序列的起始索引（需求 4）
+ *
+ * 序列结构：偶数索引=idle 舔爪视频，奇数索引=分支动作视频
+ * （0=idle, 1=动作1, 2=idle, 3=动作2, ...）
+ *
+ * 随机策略：在「idle 舔爪」与「各动作视频」这 N+1 个**不同视频**之间等概率挑选，
+ * 而不是在序列的 2N 个位置上等概率挑选 —— 后者会让 idle 占据一半概率，
+ * 达不到"提高看到不同小猫动作的几率"的目的。
+ *
+ * @param branchCount 可用的动作视频数量
+ * @return 序列起始索引；无动作视频时只能从 idle 开始，返回 0
+ */
+private fun pickRandomSequenceIndex(branchCount: Int): Int {
+    if (branchCount <= 0) return 0
+    // 每个不同视频的代表索引：idle 取 0，各动作取其奇数索引 1,3,5...
+    // 例：3 个动作 → 候选 [0, 1, 3, 5]，idle 与三个动作各占 1/4
+    val candidates = IntArray(branchCount + 1) { index ->
+        if (index == 0) 0 else index * 2 - 1
+    }
+    return candidates[Random.nextInt(candidates.size)]
+}
 
 /**
  * 从 assets 加载 Bitmap，失败返回 null

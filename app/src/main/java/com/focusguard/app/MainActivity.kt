@@ -1,15 +1,10 @@
 package com.focusguard.app
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.focusguard.app.data.SeedData
@@ -17,6 +12,7 @@ import com.focusguard.app.data.local.dao.AffinityAchievementDao
 import com.focusguard.app.data.local.dao.CatCatalogDao
 import com.focusguard.app.data.local.dao.FoodCatalogDao
 import com.focusguard.app.data.local.dao.QuizQuestionDao
+import com.focusguard.app.data.local.dao.QuoteDao
 import com.focusguard.app.data.local.dao.ReflectionQuestionDao
 import com.focusguard.app.data.local.entity.ReflectionQuestionEntity
 import com.focusguard.app.data.repository.AppRepositoryImpl
@@ -43,9 +39,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** Intent extra：专注模式防分心拉回标记，FocusGuardService 检测到用户切屏时带上 */
         const val EXTRA_FOCUS_MODE_RECALL = "focus_mode_recall"
-
-        /** 通知权限请求码（Android 13+ POST_NOTIFICATIONS 运行时权限） */
-        private const val REQUEST_POST_NOTIFICATIONS = 1001
 
         /** 一次性导航事件流：从 ConfirmActivity "去投喂"跳转时发射 true，MainScreen 收集后跳猫咪 Tab */
         private val _navigateToCatEvent = MutableStateFlow(false)
@@ -123,6 +116,10 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var achievementDao: AffinityAchievementDao
 
+    /** 小猫格言 DAO（需求 1） */
+    @Inject
+    lateinit var quoteDao: QuoteDao
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 安装 Splash Screen（必须在 super.onCreate 之前）
         installSplashScreen()
@@ -140,8 +137,6 @@ class MainActivity : ComponentActivity() {
         initSeedData()
         // 更新拦截列表
         updateBlockedApps()
-        // Android 13+ 需运行时请求通知权限，否则前台服务通知不显示、部分 ROM startForeground 崩溃
-        requestNotificationPermissionIfNeeded()
         // 启动前台保活服务
         startFocusGuardService()
         // 处理冷启动时的专注模式拉回 Intent（进程被杀后重新拉起）
@@ -207,6 +202,10 @@ class MainActivity : ComponentActivity() {
                     achievementDao.updateDescription(seed.milestone, seed.description)
                 }
             }
+            // 小猫格言（需求 1）：仅在库中一条都没有时写入内置句，避免覆盖用户自己写的
+            if (quoteDao.getAllQuotes().isEmpty()) {
+                quoteDao.insertAll(SeedData.getSeedQuotes())
+            }
         }
     }
 
@@ -238,27 +237,5 @@ class MainActivity : ComponentActivity() {
         // （JobScheduler 持久化任务在应用被系统清理后可能丢失，每次打开应用补一次保险）
         KeepAliveManager.schedule(this)
         KeepAliveManager.checkAccessibilityHealth(this)
-    }
-
-    /**
-     * Android 13+ 请求 POST_NOTIFICATIONS 运行时权限
-     * 前台服务需要通知权限才能显示保活通知；部分 ROM 在无权限时 startForeground 会崩溃
-     */
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        if (ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-        ) return
-        try {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                REQUEST_POST_NOTIFICATIONS
-            )
-        } catch (e: Exception) {
-            // 部分 ROM 可能不支持，忽略避免崩溃
-        }
     }
 }

@@ -63,6 +63,7 @@ import com.focusguard.app.ui.components.SimpleNavigationBar
 import com.focusguard.app.ui.cat.CatSelectionScreen
 import com.focusguard.app.ui.focus.FocusScreen
 import com.focusguard.app.ui.settings.SettingsScreen
+import com.focusguard.app.ui.settings.QuotesScreen
 import com.focusguard.app.ui.settings.ReflectionQuestionsScreen
 import com.focusguard.app.ui.stats.StatsScreen
 
@@ -280,7 +281,16 @@ private fun MainTabScreen() {
                     },
                     onNavigateToCatSwitch = {
                         navController.navigate("cat_switch")
+                    },
+                    onNavigateToQuotes = {
+                        navController.navigate("quotes")
                     }
+                )
+            }
+            // 小猫格言管理（需求 1）
+            composable("quotes") {
+                QuotesScreen(
+                    onBack = { navController.popBackStack() }
                 )
             }
             // 专注模式（全屏，无底部导航）

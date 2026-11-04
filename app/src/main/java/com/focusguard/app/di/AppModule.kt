@@ -10,6 +10,7 @@ import com.focusguard.app.data.local.dao.FoodInventoryDao
 import com.focusguard.app.data.local.dao.FocusSessionDao
 import com.focusguard.app.data.local.dao.QuizHistoryDao
 import com.focusguard.app.data.local.dao.QuizQuestionDao
+import com.focusguard.app.data.local.dao.QuoteDao
 import com.focusguard.app.data.local.dao.ReflectionAnswerDao
 import com.focusguard.app.data.local.dao.ReflectionQuestionDao
 import com.focusguard.app.data.local.dao.UserCatDao
@@ -81,6 +82,9 @@ object AppModule {
     @Provides
     fun provideAffinityAchievementDao(db: AppDatabase): AffinityAchievementDao =
         db.affinityAchievementDao()
+
+    @Provides
+    fun provideQuoteDao(db: AppDatabase): QuoteDao = db.quoteDao()
 
     // ===== 原有 Repository =====
 

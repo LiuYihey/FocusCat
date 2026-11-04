@@ -13,15 +13,18 @@ android {
         applicationId = "com.focusguard.app"
         minSdk = 26
         targetSdk = 35
-        // FocusCat v1.2.0 - 正式发布版本
-        // v1.2.0：无障碍保活（ColorOS）、视频随机起点、反思弹窗选择题 + 使用时长豁免
-        //   + 高定 UI 改版（4 层微明度背景分层 / 输入框聚焦双环阴影 / 暗色字重降 40 /
-        //     正文 text-wrap:pretty / 专注页环形进度计时器 / 全屏沉浸式 / 底栏留白均衡 /
-        //     全局削减二级标签与描述文案）
-        //   + 实测修复保活链路三处真实缺陷（误报 / 假故障 / 调度失效）
-        // 版本号保持 v1.2.0（细微调整不递增）
-        versionCode = 121
-        versionName = "1.2.0"
+        // FocusCat v1.5.0 - 正式发布版本
+        // v1.5.0：
+        //   1. 小猫格言系统：退出被约束应用不再发放猫粮，改为随机展示一句用户自写格言；
+        //      格言在「提醒时间到了」流程同样出现；设置内可编辑 / 新增 / 删除格言；
+        //      猫粮奖励仅保留在专注时长
+        //   2. 取消全部通知：移除 POST_NOTIFICATIONS 权限与所有用户可见通知
+        //   3. 无障碍服务存活：stopWithTask=false + onRebind 支持系统重新绑定，
+        //      划掉应用 / 进程被杀后由系统托管并自动重绑
+        //   4. idle 视频随机起点：进入页面或换猫时从"舔爪 / 各动作"中随机挑一个从头播放，
+        //      提高看到不同小猫动作的几率
+        versionCode = 150
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
