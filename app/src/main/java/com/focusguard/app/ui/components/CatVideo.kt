@@ -256,6 +256,15 @@ fun CatVideo(
                         exoPlayer.playbackState == Player.STATE_ENDED
                     ) {
                         exoPlayer.prepare()
+                    } else if (exoPlayer.currentMediaItem != null) {
+                        // 后台期间系统可能回收 MediaCodec（logcat 可见
+                        // "MediaCodec discarded an unknown buffer"），
+                        // 此时播放器状态仍是 READY，但解码器已失效，画面是黑的。
+                        // 必须重新 prepare 让 ExoPlayer 重建解码器并渲染首帧。
+                        // 同时先标记为不健康，用品种 PNG（= 视频首帧）兜底，
+                        // 避免从后台返回时出现黑屏空窗。
+                        isVideoHealthy = false
+                        exoPlayer.prepare()
                     }
                     exoPlayer.playWhenReady = true
                 }
