@@ -121,6 +121,17 @@ fun CatVideo(
     // 是否还需要执行一次随机起跳（在下一个 READY 时消费）
     var pendingRandomSeek by remember { mutableStateOf(false) }
 
+    // 本播放器实例是否收到过 ON_STOP（组合仍存活，但播放器已停止）。
+    //
+    // 触发场景：App 整体进入后台，或跳转到其他页面后本组合仍存活。
+    // 这两种情况下系统的 MediaCodec 都可能被回收，
+    // 回前台时需要 stop() + prepare() 强制重建解码器。
+    //
+    // 区分依据：NavBackStackEntry 在"跳到别的页面"时降到 CREATED（ON_STOP），
+    // App 整体进后台时同样降到 CREATED（ON_STOP）。
+    // 若组合被销毁重建（如切 Tab），此标记随 remember 自动复位为 false。
+    var playerStopped by remember { mutableStateOf(false) }
+
     // 已消耗随机起跳的内容标识（需求 2）
     // 同一只猫的同一段视频只随机一次：进入页面 / 换猫时随机，
     // 待机动画自身循环切换（idle → 动作 → idle）不再跳位，避免动作中途突兀。
@@ -249,22 +260,42 @@ fun CatVideo(
                 Lifecycle.Event.ON_PAUSE -> {
                     exoPlayer.pause()
                 }
+                Lifecycle.Event.ON_STOP -> {
+                    // 播放器随组合停止：系统可能回收 MediaCodec
+                    playerStopped = true
+                }
                 Lifecycle.Event.ON_RESUME -> {
-                    // 回到前台：恢复播放；若状态异常则重新 prepare
-                    // 不标记不健康，让 STATE_READY 自然恢复健康状态，避免 fallback 闪现
-                    if (exoPlayer.playbackState == Player.STATE_IDLE ||
-                        exoPlayer.playbackState == Player.STATE_ENDED
-                    ) {
-                        exoPlayer.prepare()
-                    } else if (exoPlayer.currentMediaItem != null) {
-                        // 后台期间系统可能回收 MediaCodec（logcat 可见
-                        // "MediaCodec discarded an unknown buffer"），
-                        // 此时播放器状态仍是 READY，但解码器已失效，画面是黑的。
-                        // 必须重新 prepare 让 ExoPlayer 重建解码器并渲染首帧。
-                        // 同时先标记为不健康，用品种 PNG（= 视频首帧）兜底，
-                        // 避免从后台返回时出现黑屏空窗。
-                        isVideoHealthy = false
-                        exoPlayer.prepare()
+                    // 回到前台：恢复播放
+                    //
+                    // Media3 1.2.1 关键约束：prepare() 只在 STATE_IDLE 时才真正生效
+                    // —— ExoPlayerImpl.prepare() 对非 IDLE 状态直接 return。
+                    // 因此旧实现"无条件 isVideoHealthy=false + prepare()"有两处问题：
+                    //   1) prepare() 是空操作 → 根本没有重建解码器；
+                    //   2) 若 STATE_READY 先于 ON_RESUME 到达，之后再也不会有新的 READY
+                    //      把 isVideoHealthy 恢复成 true → 占位图永久盖住正在播放的
+                    //      视频（真机表现：回首页只有静态占位图；切去别的菜单时，
+                    //      占位图随转场淡出，反而露出底下的视频"闪"一下）。
+                    //
+                    // 正确做法：只在确有必要时改动播放器状态，且任何一次
+                    // isVideoHealthy=false 都必须保证后续有 READY 事件把它恢复为 true。
+                    if (playerStopped) {
+                        playerStopped = false
+                        val state = exoPlayer.playbackState
+                        if (state == Player.STATE_READY || state == Player.STATE_BUFFERING) {
+                            // App 整体进过后台：系统可能回收 MediaCodec，
+                            // 播放器状态仍是 READY 但解码器已失效、画面是黑的。
+                            // stop() 回到 IDLE（保留 MediaItem 与播放位置），
+                            // 再 prepare() 强制重建解码器并重新渲染首帧；
+                            // 重建期间用品种 PNG（= 视频首帧）兜底，避免黑屏空窗。
+                            isVideoHealthy = false
+                            exoPlayer.stop()
+                            exoPlayer.prepare()
+                        } else if (state == Player.STATE_IDLE && exoPlayer.currentMediaItem != null) {
+                            // 上次播放出错后停在 IDLE：重新 prepare() 重试。
+                            // 此处 prepare() 真实生效（IDLE 状态），READY 后会恢复健康状态。
+                            exoPlayer.prepare()
+                        }
+                        // STATE_ENDED：视频已播完，由 onCompletion 推进视频序列，不干预
                     }
                     exoPlayer.playWhenReady = true
                 }

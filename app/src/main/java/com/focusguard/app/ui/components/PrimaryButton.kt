@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.dp
  * @param height 按钮高度
  * @param containerColor 容器色（默认主色）
  * @param contentColor 文字色
+ * @param textStyle 文字样式（默认 labelLarge；需要更大字号时显式传入）
  */
 @Composable
 fun PrimaryButton(
@@ -62,7 +64,8 @@ fun PrimaryButton(
     loading: Boolean = false,
     height: Dp = 56.dp,
     containerColor: Color = MaterialTheme.colorScheme.primary,
-    contentColor: Color = MaterialTheme.colorScheme.onPrimary
+    contentColor: Color = MaterialTheme.colorScheme.onPrimary,
+    textStyle: TextStyle = MaterialTheme.typography.labelLarge
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -118,7 +121,7 @@ fun PrimaryButton(
         } else {
             Text(
                 text = text,
-                style = MaterialTheme.typography.labelLarge,
+                style = textStyle,
                 color = actualContent
             )
         }
