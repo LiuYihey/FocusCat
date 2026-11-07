@@ -59,3 +59,12 @@ old/
 
 # Generated / temp
 app_icon_generated.png
+
+# 兄弟项目（FocusFish 是独立仓库，拥有各自的 GitHub 远端）
+# FocusCat 与 FocusFish 是两个互不相关的 App，禁止把对方的文件混进来。
+# 只锚定仓库根目录，不要用 **/ 前缀 —— 否则任何层级下名为 focusfish
+# 的目录都会被误伤（包括未来本项目自己可能引入的包路径）。
+/FocusFish/
+/focusfish/
+/FocusCat/
+/focuscat/
